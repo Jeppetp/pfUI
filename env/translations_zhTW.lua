@@ -544,7 +544,6 @@ pfUI_translation["zhTW"] = {
   ["Only Count Bagspace On Regular Bags"] = "只統計常規背包空間",
   ["Only Show Chat Dock On Mouseover"] = "只在滑鼠懸停時顯示聊天視窗停靠欄",
   ["Only Show On Mouse Over"] = nil,
-  ["Only Show Own Debuffs (|cffffaaaaExperimental|r)"] = nil,
   ["Only Show Target Castbar"] = nil,
   ["On State Change"] = nil,
   ["Options"] = nil,

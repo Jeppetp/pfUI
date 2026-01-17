@@ -1023,6 +1023,23 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
         "default:" .. T["Default"],
         "tukui:TukUI"
       },
+      ["debufffilter"] = function()
+        -- Dynamic dropdown based on Enhanced Tracking status
+        local hasNampower = GetNampowerVersion ~= nil
+        local enhancedActive = C.unitframes.enhanced_tracking == "1" and hasNampower
+        
+        if enhancedActive then
+          return {
+            "off:" .. T["Show All De/Buffs"],
+            "own:" .. T["Own De/Buffs Only"],
+            "smart:" .. T["Own + Shared De/Buffs"],
+          }
+        else
+          return {
+            "off:" .. T["Show All De/Buffs"] .. " |cffaaaaaa(" .. T["Enhanced Required"] .. ")|r",
+          }
+        end
+      end,
       ["uf_color"] = {
         "0:" .. T["Class"],
         "1:" .. T["Custom"],
@@ -1637,6 +1654,7 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
 
       CreateConfig(U[c], T["Group Options"], nil, nil, "header")
       CreateConfig(nil, T["Enable 40y-Range Check"], C.unitframes, "rangecheck", "checkbox", nil, nil, nil, nil, "vanilla" )
+      CreateConfig(nil, T["Enhanced Debuff Tracking (|cffffaaaaExperimental|r)"], C.unitframes, "enhanced_tracking", "checkbox", nil, nil, nil, nil, "vanilla")
       CreateConfig(nil, T["Range Check Interval"], C.unitframes, "rangechecki", "dropdown", pfUI.gui.dropdowns.uf_rangecheckinterval, nil, nil, nil, "vanilla")
       CreateConfig(nil, T["Use Raid Frames To Display Group Members"], C.unitframes, "raidforgroup", "checkbox")
       CreateConfig(nil, T["Always Show Self In Raid Frames"], C.unitframes, "selfinraid", "checkbox")
@@ -1846,10 +1864,6 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
         CreateConfig(U[c], T["Debuff Limit"], C.unitframes[c], "debufflimit")
         CreateConfig(U[c], T["Debuffs Per Row"], C.unitframes[c], "debuffperrow")
 
-        if c ~= "player" then
-          CreateConfig(U[c], T["Only Show Own Debuffs (|cffffaaaaExperimental|r)"], C.unitframes[c], "selfdebuff", "checkbox")
-        end
-
         CreateConfig(U[c], T["Combat/Aggro Indicators"], nil, nil, "header")
         CreateConfig(U[c], T["Display Aggro Indicator"], C.unitframes[c], "squareaggro", "checkbox")
         CreateConfig(U[c], T["Display Combat Indicator"], C.unitframes[c], "squarecombat", "checkbox")
@@ -1858,6 +1872,11 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
 
         CreateConfig(U[c], T["Buff/Debuff Indicators"], nil, nil, "header")
         CreateConfig(U[c], T["Enable Indicators"], C.unitframes[c], "buff_indicator", "checkbox")
+        
+        if c ~= "player" then
+          CreateConfig(U[c], T["De/Buff Indicator Filter"], C.unitframes[c], "debufffilter", "dropdown", pfUI.gui.dropdowns.debufffilter)
+        end
+        
         CreateConfig(U[c], T["Show Time Left"], C.unitframes[c], "indicator_time", "checkbox")
         CreateConfig(U[c], T["Show Stacks"], C.unitframes[c], "indicator_stacks", "checkbox")
         CreateConfig(U[c], T["Indicator Size"], C.unitframes[c], "indicator_size")
@@ -2019,7 +2038,7 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
       CreateConfig(nil, T["Color Debuff Stacks"], C.buffbar.tdebuff, "colorstacks", "checkbox")
       CreateConfig(nil, T["Buffbar Width"], C.buffbar.tdebuff, "width")
       CreateConfig(nil, T["Buffbar Height"], C.buffbar.tdebuff, "height")
-      CreateConfig(nil, T["Only Show Own Debuffs (|cffffaaaaExperimental|r)"], C.buffbar.tdebuff, "selfdebuff", "checkbox")
+      CreateConfig(nil, T["Debuff Display Filter"], C.buffbar.tdebuff, "debufffilter", "dropdown", pfUI.gui.dropdowns.debufffilter)
       CreateConfig(nil, T["Filter Mode"], C.buffbar.tdebuff, "filter", "dropdown", pfUI.gui.dropdowns.buffbarfilter)
       CreateConfig(nil, T["Time Threshold"], C.buffbar.tdebuff, "threshold")
       CreateConfig(nil, T["Whitelist"], C.buffbar.tdebuff, "whitelist", "list")
@@ -2354,7 +2373,7 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
       CreateConfig(U["nameplates"], T["Debuff Icon Size"], C.nameplates, "debuffsize")
       CreateConfig(U["nameplates"], T["Estimate Debuffs"], C.nameplates, "guessdebuffs", "checkbox")
       CreateConfig(U["nameplates"], T["Show Debuff Stacks"], C.nameplates.debuffs, "showstacks", "checkbox")
-      CreateConfig(U["nameplates"], T["Only Show Own Debuffs (|cffffaaaaExperimental|r)"], C.nameplates, "selfdebuff", "checkbox")
+      CreateConfig(U["nameplates"], T["Debuff Display Filter"], C.nameplates, "debufffilter", "dropdown", pfUI.gui.dropdowns.debufffilter)
       CreateConfig(U["nameplates"], T["Filter Mode"], C.nameplates.debuffs, "filter", "dropdown", pfUI.gui.dropdowns.buffbarfilter)
       CreateConfig(U["nameplates"], T["Blacklist"], C.nameplates.debuffs, "blacklist", "list")
       CreateConfig(U["nameplates"], T["Whitelist"], C.nameplates.debuffs, "whitelist", "list")
@@ -2426,7 +2445,6 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
       CreateConfig(nil, "BetterCharacterStats", C.thirdparty.bcs, "enable", "checkbox", nil, nil, nil, nil, "vanilla")
       CreateConfig(nil, "Crafty", C.thirdparty.crafty, "enable", "checkbox", nil, nil, nil, nil, "vanilla")
       CreateConfig(nil, "CleverMacro", C.thirdparty.clevermacro, "enable", "checkbox", nil, nil, nil, nil, "vanilla")
-      CreateConfig(nil, "SuperCleveRoidMacros", C.thirdparty.supercleveroidmacros, "enable", "checkbox", nil, nil, nil, nil, "vanilla")
       CreateConfig(nil, "AckisRecipeList", C.thirdparty.ackis, "enable", "checkbox", nil, nil, nil, nil, "tbc")
       CreateConfig(nil, "SheepWatch", C.thirdparty.sheepwatch, "enable", "checkbox", nil, nil, nil, nil, "tbc")
       CreateConfig(nil, "TotemTimers", C.thirdparty.totemtimers, "enable", "checkbox", nil, nil, nil, nil, "tbc")

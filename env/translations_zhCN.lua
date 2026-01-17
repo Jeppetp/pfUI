@@ -544,7 +544,6 @@ pfUI_translation["zhCN"] = {
   ["Only Count Bagspace On Regular Bags"] = "只统计常规背包空间",
   ["Only Show Chat Dock On Mouseover"] = "只在鼠标悬停时显示聊天窗口停靠栏",
   ["Only Show On Mouse Over"] = "仅鼠标悬停时显示",
-  ["Only Show Own Debuffs (|cffffaaaaExperimental|r)"] = "只显示自己施加的Debuff（|cffffaaaa测试功能|r）",
   ["Only Show Target Castbar"] = "只显示目标施法条",
   ["On State Change"] = "状态改变时",
   ["Options"] = "设置",

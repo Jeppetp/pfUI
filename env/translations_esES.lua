@@ -544,7 +544,6 @@ pfUI_translation["esES"] = {
   ["Only Count Bagspace On Regular Bags"] = "Sólo contar espacio de bolsas normales",
   ["Only Show Chat Dock On Mouseover"] = "Sólo mostrar el dock del chat al pasar el puntero",
   ["Only Show On Mouse Over"] = nil,
-  ["Only Show Own Debuffs (|cffffaaaaExperimental|r)"] = nil,
   ["Only Show Target Castbar"] = nil,
   ["On State Change"] = "En un cambio de estado",
   ["Options"] = "Opciones",

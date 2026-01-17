@@ -1529,19 +1529,29 @@ function pfUI.uf:RefreshUnit(unit, component)
     local texture, stacks
 
     for i=1, unit.config.bufflimit do
-      if not unit.buffs[i] then break end
+  if not unit.buffs[i] then break end
 
-      if unit.label == "player" then
-        stacks = GetPlayerBuffApplications(GetPlayerBuff(PLAYER_BUFF_START_ID+i,"HELPFUL"))
-        texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+i,"HELPFUL"))
+  if unit.label == "player" then
+    stacks = GetPlayerBuffApplications(GetPlayerBuff(PLAYER_BUFF_START_ID+i,"HELPFUL"))
+    texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+i,"HELPFUL"))
+  else
+    texture, stacks = pfUI.uf:DetectBuff(unitstr, i)
+  end
+
+  unit.buffs[i].texture:SetTexture(texture)
+
+  if texture then
+    unit.buffs[i]:Show()
+    
+    -- Enhanced Mode: Add timer for target buffs
+    if unit.label ~= "player" and pfUI_config and pfUI_config.unitframes and pfUI_config.unitframes.enhanced_tracking == "1" and pfUI.api.libdebuff then
+      local name, _, _, _, _, duration, timeleft = pfUI.api.libdebuff:UnitBuff(unitstr, i)
+      if duration and timeleft then
+        CooldownFrame_SetTimer(unit.buffs[i].cd, GetTime() + timeleft - duration, duration, 1)
       else
-        texture, stacks = pfUI.uf:DetectBuff(unitstr, i)
+        CooldownFrame_SetTimer(unit.buffs[i].cd, 0, 0, 0)
       end
-
-      unit.buffs[i].texture:SetTexture(texture)
-
-      if texture then
-        unit.buffs[i]:Show()
+    end
 
         if stacks > 1 then
           unit.buffs[i].stacks:SetText(stacks)
@@ -1559,7 +1569,7 @@ function pfUI.uf:RefreshUnit(unit, component)
     local texture, stacks, dtype
     local perrow = unit.config.debuffperrow
     local bperrow = unit.config.buffperrow
-    local selfdebuff = unit.config.selfdebuff
+    local debufffilter = unit.config.debufffilter
 
     local invert_h, invert_v, af
     if unit.config.debuffs == "TOPLEFT" then
@@ -1613,7 +1623,9 @@ function pfUI.uf:RefreshUnit(unit, component)
         texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
         stacks = GetPlayerBuffApplications(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
         dtype = GetPlayerBuffDispelType(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
-      elseif selfdebuff == "1" then
+      elseif debufffilter == "smart" then
+        _, _, texture, stacks, dtype = libdebuff:UnitSmartDebuff(unitstr, i)
+      elseif debufffilter == "own" then
         _, _, texture, stacks, dtype = libdebuff:UnitOwnDebuff(unitstr, i)
       else
         texture, stacks, dtype = UnitDebuff(unitstr, i)
@@ -1633,15 +1645,28 @@ function pfUI.uf:RefreshUnit(unit, component)
         if unit:GetName() == "pfPlayer" then
           local timeleft = GetPlayerBuffTimeLeft(GetPlayerBuff(PLAYER_BUFF_START_ID+unit.debuffs[i].id, "HARMFUL"),"HARMFUL")
           CooldownFrame_SetTimer(unit.debuffs[i].cd, GetTime(), timeleft, 1)
-        elseif libdebuff and selfdebuff == "1" then
+        elseif libdebuff and debufffilter == "smart" then
+          local name, rank, texture, stacks, dtype, duration, timeleft, caster = libdebuff:UnitSmartDebuff(unitstr, i)
+          if duration and timeleft then
+            CooldownFrame_SetTimer(unit.debuffs[i].cd, GetTime() + timeleft - duration, duration, 1)
+          end
+        elseif libdebuff and debufffilter == "own" then
           local name, rank, texture, stacks, dtype, duration, timeleft, caster = libdebuff:UnitOwnDebuff(unitstr, i)
           if duration and timeleft then
             CooldownFrame_SetTimer(unit.debuffs[i].cd, GetTime() + timeleft - duration, duration, 1)
           end
         elseif libdebuff then
           local name, rank, texture, stacks, dtype, duration, timeleft, caster = libdebuff:UnitDebuff(unitstr, i)
-          if duration and timeleft then
-            CooldownFrame_SetTimer(unit.debuffs[i].cd, GetTime() + timeleft - duration, duration, 1)
+          
+          -- "Show All" mode: Only show timers for shared buffs/debuffs or own casts
+          if duration and timeleft and name then
+            local isShared = libdebuff:IsSharedAura(name)
+            local isOwn = (caster == "player")
+            
+            -- Show timer only if shared OR from player
+            if isShared or isOwn then
+              CooldownFrame_SetTimer(unit.debuffs[i].cd, GetTime() + timeleft - duration, duration, 1)
+            end
           end
         end
 
@@ -1816,6 +1841,45 @@ function pfUI.uf:RefreshUnit(unit, component)
                 pfUI.uf:AddIcon(unit, pos, texture, timeleft or prediction, count, tonumber(start), tonumber(duration))
                 pos = pos + 1
                 break
+              elseif string.lower(texture) == "interface\\icons\\spell_nature_nullifypoison" then
+                if pfUI_config and pfUI_config.unitframes and pfUI_config.unitframes.enhanced_tracking == "1" and pfUI.api.libdebuff then
+                  local name, _, _, _, _, duration, timeleft = pfUI.api.libdebuff:UnitBuff(unitstr, i)
+                  if duration and timeleft and timeleft > 0 then
+                    pfUI.uf:AddIcon(unit, pos, texture, timeleft, count, GetTime() + timeleft - duration, duration)
+                  else
+                    pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                  end
+                else
+                  pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                end
+                pos = pos + 1
+                break
+              elseif string.lower(texture) == "interface\\icons\\spell_nature_thorns" then
+                if pfUI_config and pfUI_config.unitframes and pfUI_config.unitframes.enhanced_tracking == "1" and pfUI.api.libdebuff then
+                  local name, _, _, _, _, duration, timeleft = pfUI.api.libdebuff:UnitBuff(unitstr, i)
+                  if duration and timeleft and timeleft > 0 then
+                    pfUI.uf:AddIcon(unit, pos, texture, timeleft, count, GetTime() + timeleft - duration, duration)
+                  else
+                    pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                  end
+                else
+                  pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                end
+                pos = pos + 1
+                break
+              elseif string.lower(texture) == "interface\\icons\\spell_nature_regeneration" then
+                if pfUI_config and pfUI_config.unitframes and pfUI_config.unitframes.enhanced_tracking == "1" and pfUI.api.libdebuff then
+                  local name, _, _, _, _, duration, timeleft = pfUI.api.libdebuff:UnitBuff(unitstr, i)
+                  if duration and timeleft and timeleft > 0 then
+                    pfUI.uf:AddIcon(unit, pos, texture, timeleft, count, GetTime() + timeleft - duration, duration)
+                  else
+                    pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                  end
+                else
+                  pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                end
+                pos = pos + 1
+                break
               else
                 pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
                 pos = pos + 1
@@ -1830,45 +1894,303 @@ function pfUI.uf:RefreshUnit(unit, component)
     if table.getn(unit.indicator_custom) > 0 then
       scanner = scanner or libtipscan:GetScanner("unitframes")
 
-      for i=1,32 do -- scan for custom buffs
-        local texture, count = UnitBuff(unitstr, i)
-        if texture then
-          local timeleft, name, _
-          if pfUI.client > 11200 then
-            name, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
-          else
-            scanner:SetUnitBuff(unitstr, i)
-            name = scanner:Line(1) or ""
+      -- Enhanced Mode: Scan Buffs from enhancedDebuffs table (it contains both buffs AND debuffs)
+      if C.unitframes.enhanced_tracking == "1" and libdebuff and libdebuff.GetEnhancedDebuffs then
+        -- Debug: Log mode only once per session
+        if libdebuff.IsDebugEnabled and libdebuff:IsDebugEnabled() then
+          if not pfUI.indicatorModeLogged then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[INDICATOR]|r Using ENHANCED mode for custom indicators (Buffs + Debuffs)")
+            pfUI.indicatorModeLogged = true
           end
+        end
+        
+        local _, unitGUID = UnitExists(unitstr)
+        local _, playerGUID = UnitExists("player")
+        
+        if unitGUID and playerGUID then
+          local enhancedAuras = libdebuff:GetEnhancedDebuffs(unitGUID)
+          
+          if enhancedAuras then
+            -- Scan for Buffs in enhanced tracking
+            for spellName, casters in pairs(enhancedAuras) do
+              local matchesFilter = false
+              for _, filter in pairs(unit.indicator_custom) do
+                if filter == string.lower(spellName) then
+                  matchesFilter = true
+                  break
+                end
+              end
+              
+              if matchesFilter then
+                -- Check if this is a shared buff (only one can exist at a time)
+                local isShared = pfUI.api.libdebuff and pfUI.api.libdebuff:IsSharedAura(spellName)
+                
+                local playerBuff = casters[playerGUID]
+                local hasOtherCasters = false
+                local anyOtherCaster = nil
+                
+                for casterGUID, data in pairs(casters) do
+                  if casterGUID ~= playerGUID then
+                    hasOtherCasters = true
+                    anyOtherCaster = data
+                    break
+                  end
+                end
+                
+                -- Get texture by scanning UnitBuff
+                local texture = nil
+                for i=1,32 do
+                  local checkName, checkTexture
+                  if pfUI.client > 11200 then
+                    checkName = _G.UnitBuff(unitstr, i)
+                    if checkName and string.lower(checkName) == string.lower(spellName) then
+                      _, _, texture = _G.UnitBuff(unitstr, i)
+                    end
+                  else
+                    checkTexture = UnitBuff(unitstr, i)
+                    if checkTexture then
+                      scanner:SetUnitBuff(unitstr, i)
+                      checkName = scanner:Line(1)
+                      if checkName and string.lower(checkName) == string.lower(spellName) then
+                        texture = checkTexture
+                      end
+                    end
+                  end
+                  
+                  if texture then break end
+                end
+                
+                if texture then
+                  -- SHARED buffs: Always show timer (only one can exist)
+                  if isShared then
+                    local data = playerBuff or anyOtherCaster
+                    if data then
+                      local timeLeft = (data.startTime + data.duration) - GetTime()
+                      if timeLeft > 0 then
+                        pfUI.uf:AddIcon(unit, pos, texture, timeLeft, 0, data.startTime, data.duration)
+                        pos = pos + 1
+                      end
+                    end
+                  -- NON-SHARED: Show YOUR timer, others without timer
+                  else
+                    if playerBuff then
+                      local timeLeft = (playerBuff.startTime + playerBuff.duration) - GetTime()
+                      if timeLeft > 0 then
+                        pfUI.uf:AddIcon(unit, pos, texture, timeLeft, 0, playerBuff.startTime, playerBuff.duration)
+                        pos = pos + 1
+                      end
+                    elseif hasOtherCasters then
+                      pfUI.uf:AddIcon(unit, pos, texture, nil, 0)
+                      pos = pos + 1
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+        
+      -- Legacy Mode: Slot-based scan for Buffs
+      else
+        -- Debug: Log mode only once per session
+        if libdebuff and libdebuff.IsDebugEnabled and libdebuff:IsDebugEnabled() then
+          if not pfUI.indicatorModeLogged then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffff6600[INDICATOR]|r Using LEGACY mode for custom indicators (Buffs + Debuffs)")
+            pfUI.indicatorModeLogged = true
+          end
+        end
+        
+        for i=1,32 do
+          local texture, count = UnitBuff(unitstr, i)
+          if texture then
+            local timeleft, name, _
+            if pfUI.client > 11200 then
+              name, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
+            else
+              scanner:SetUnitBuff(unitstr, i)
+              name = scanner:Line(1) or ""
+            end
 
-          -- match filter
-          for _, filter in pairs(unit.indicator_custom) do
-            if filter == string.lower(name) then
-              pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
-              pos = pos + 1
-              break
+            -- match filter
+            for _, filter in pairs(unit.indicator_custom) do
+              if filter == string.lower(name) then
+                if string.lower(texture) == "interface\\icons\\spell_nature_rejuvenation" then
+                  local start, duration, prediction = libpredict:GetHotDuration(unitstr, "Reju")
+                  pfUI.uf:AddIcon(unit, pos, texture, timeleft or prediction, count, tonumber(start), tonumber(duration))
+                  pos = pos + 1
+                  break
+                elseif string.lower(texture) == "interface\\icons\\spell_holy_renew" then
+                  local start, duration, prediction = libpredict:GetHotDuration(unitstr, "Renew")
+                  pfUI.uf:AddIcon(unit, pos, texture, timeleft or prediction, count, tonumber(start), tonumber(duration))
+                  pos = pos + 1
+                  break
+                elseif string.lower(texture) == "interface\\icons\\spell_nature_resistnature" then
+                  local start, duration, prediction = libpredict:GetHotDuration(unitstr, "Regr")
+                  pfUI.uf:AddIcon(unit, pos, texture, timeleft or prediction, count, tonumber(start), tonumber(duration))
+                  pos = pos + 1
+                  break
+                elseif string.lower(texture) == "interface\\icons\\spell_nature_nullifypoison" or string.lower(name) == "abolish poison" then
+                  if libdebuff then
+                    local bname, _, _, _, _, duration, timeleft = libdebuff:UnitBuff(unitstr, i)
+                    if duration and timeleft and timeleft > 0 then
+                      pfUI.uf:AddIcon(unit, pos, texture, timeleft, count, GetTime() + timeleft - duration, duration)
+                    else
+                      pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                    end
+                  else
+                    pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                  end
+                  pos = pos + 1
+                  break
+                elseif string.lower(texture) == "interface\\icons\\spell_nature_thorns" or string.lower(name) == "thorns" then
+                  if libdebuff then
+                    local bname, _, _, _, _, duration, timeleft = libdebuff:UnitBuff(unitstr, i)
+                    if duration and timeleft and timeleft > 0 then
+                      pfUI.uf:AddIcon(unit, pos, texture, timeleft, count, GetTime() + timeleft - duration, duration)
+                    else
+                      pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                    end
+                  else
+                    pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                  end
+                  pos = pos + 1
+                  break
+                elseif string.lower(texture) == "interface\\icons\\spell_nature_regeneration" or string.lower(name) == "mark of the wild" then
+                  if libdebuff then
+                    local bname, _, _, _, _, duration, timeleft = libdebuff:UnitBuff(unitstr, i)
+                    if duration and timeleft and timeleft > 0 then
+                      pfUI.uf:AddIcon(unit, pos, texture, timeleft, count, GetTime() + timeleft - duration, duration)
+                    else
+                      pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                    end
+                  else
+                    pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                  end
+                  pos = pos + 1
+                  break
+                else
+                  pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                  pos = pos + 1
+                  break
+                end
+              end
             end
           end
         end
       end
 
-      for i=1,32 do -- scan for custom debuffs
-        local texture, count = UnitDebuff(unitstr, i)
-        if texture then
-          local timeleft, name, _
-          if libdebuff then
-            name, _, texture, _, _, _, timeleft = libdebuff:UnitDebuff(unitstr, i)
-          else
-            scanner:SetUnitDebuff(unitstr, i)
-            name = scanner:Line(1) or ""
+      -- Enhanced Mode: Scan Debuffs from enhancedDebuffs table
+      if C.unitframes.enhanced_tracking == "1" and libdebuff and libdebuff.GetEnhancedDebuffs then
+        local _, unitGUID = UnitExists(unitstr)
+        local _, playerGUID = UnitExists("player")
+        
+        if unitGUID and playerGUID then
+          local targetDebuffs = libdebuff:GetEnhancedDebuffs(unitGUID)
+          
+          if targetDebuffs then
+            for spellName, casters in pairs(targetDebuffs) do
+              local matchesFilter = false
+              for _, filter in pairs(unit.indicator_custom) do
+                if filter == string.lower(spellName) then
+                  matchesFilter = true
+                  break
+                end
+              end
+              
+              if matchesFilter then
+                -- Check if this is a shared debuff/buff (only one can exist at a time)
+                local isShared = pfUI.api.libdebuff and pfUI.api.libdebuff:IsSharedAura(spellName)
+                
+                local playerDebuff = casters[playerGUID]
+                local hasOtherCasters = false
+                local anyOtherCaster = nil
+                
+                -- Check if there are casters other than player
+                for casterGUID, data in pairs(casters) do
+                  if casterGUID ~= playerGUID then
+                    hasOtherCasters = true
+                    anyOtherCaster = data
+                    break
+                  end
+                end
+                
+                -- Get texture by scanning for the spell name (only need to do this once)
+                local texture = nil
+                for i=1,32 do
+                  local checkName, checkTexture
+                  if pfUI.client > 11200 then
+                    checkName = _G.UnitDebuff(unitstr, i)
+                    if checkName and string.lower(checkName) == string.lower(spellName) then
+                      _, _, texture = _G.UnitDebuff(unitstr, i)
+                    end
+                  else
+                    checkTexture = UnitDebuff(unitstr, i)
+                    if checkTexture then
+                      scanner:SetUnitDebuff(unitstr, i)
+                      checkName = scanner:Line(1)
+                      if checkName and string.lower(checkName) == string.lower(spellName) then
+                        texture = checkTexture
+                      end
+                    end
+                  end
+                  
+                  if texture then break end
+                end
+                
+                if texture then
+                  -- SHARED debuffs/buffs: Always show timer (only one can exist)
+                  if isShared then
+                    local data = playerDebuff or anyOtherCaster
+                    if data then
+                      local timeLeft = (data.startTime + data.duration) - GetTime()
+                      if timeLeft > 0 then
+                        pfUI.uf:AddIcon(unit, pos, texture, timeLeft, 0, data.startTime, data.duration)
+                        pos = pos + 1
+                      end
+                    end
+                  -- NON-SHARED: Show YOUR timer, others without timer
+                  else
+                    if playerDebuff then
+                      local timeLeft = (playerDebuff.startTime + playerDebuff.duration) - GetTime()
+                      if timeLeft > 0 then
+                        pfUI.uf:AddIcon(unit, pos, texture, timeLeft, 0, playerDebuff.startTime, playerDebuff.duration)
+                        pos = pos + 1
+                      end
+                    elseif hasOtherCasters then
+                      -- Show without timer
+                      pfUI.uf:AddIcon(unit, pos, texture, nil, 0)
+                      pos = pos + 1
+                    end
+                  end
+                end
+              end
+            end
           end
+        end
+        
+      -- Legacy Mode: Slot-based scan
+      else
+        for i=1,32 do
+          local texture, count = UnitDebuff(unitstr, i)
+          if texture then
+            local timeleft, name, caster, _
+            if libdebuff then
+              name, _, texture, _, _, duration, timeleft, caster = libdebuff:UnitDebuff(unitstr, i)
+            else
+              scanner:SetUnitDebuff(unitstr, i)
+              name = scanner:Line(1) or ""
+            end
 
-          -- match filter
-          for _, filter in pairs(unit.indicator_custom) do
-            if filter == string.lower(name) then
-              pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
-              pos = pos + 1
-              break
+            for _, filter in pairs(unit.indicator_custom) do
+              if filter == string.lower(name) then
+                if duration and timeleft then
+                  pfUI.uf:AddIcon(unit, pos, texture, timeleft, count, GetTime() + timeleft - duration, duration)
+                else
+                  pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                end
+                pos = pos + 1
+                break
+              end
             end
           end
         end
@@ -2205,9 +2527,9 @@ function pfUI.uf:AddIcon(frame, pos, icon, timeleft, stacks, start, duration)
   end
 
   -- show remaining time if config is set
-  if showtime and start and duration and timeleft < 100 and iconsize > 9 then
+  if showtime and start and duration and timeleft < 10000 and iconsize > 9 then
     CooldownFrame_SetTimer(frame.icon[pos].cd, start, duration, 1)
-  elseif showtime and timeleft and timeleft < 100 and iconsize > 9 then
+  elseif showtime and timeleft and timeleft < 10000 and iconsize > 9 then
     CooldownFrame_SetTimer(frame.icon[pos].cd, GetTime(), timeleft, 1)
   else
     CooldownFrame_SetTimer(frame.icon[pos].cd, GetTime(), 0, 1)

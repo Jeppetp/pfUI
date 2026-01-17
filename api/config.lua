@@ -119,7 +119,7 @@ function pfUI:LoadConfig()
   pfUI:UpdateConfig("buffbar",    "tdebuff",     "colorstacks",      "0")
   pfUI:UpdateConfig("buffbar",    "tdebuff",     "width",            "-1")
   pfUI:UpdateConfig("buffbar",    "tdebuff",     "height",           "20")
-  pfUI:UpdateConfig("buffbar",    "tdebuff",     "selfdebuff",       "0")
+  pfUI:UpdateConfig("buffbar",    "tdebuff",     "debufffilter",     "off")
   pfUI:UpdateConfig("buffbar",    "tdebuff",     "filter",           "blacklist")
   pfUI:UpdateConfig("buffbar",    "tdebuff",     "threshold",        "120")
   pfUI:UpdateConfig("buffbar",    "tdebuff",     "whitelist",        "")
@@ -445,7 +445,7 @@ function pfUI:LoadConfig()
     pfUI:UpdateConfig("unitframes", unit,      "debuffsize",       "20")
     pfUI:UpdateConfig("unitframes", unit,      "debufflimit",      "32")
     pfUI:UpdateConfig("unitframes", unit,      "debuffperrow",     "8")
-    pfUI:UpdateConfig("unitframes", unit,      "selfdebuff",       "0")
+    pfUI:UpdateConfig("unitframes", unit,      "debufffilter",     "off")
     pfUI:UpdateConfig("unitframes", unit,      "invert_healthbar", "0")
     pfUI:UpdateConfig("unitframes", unit,      "verticalbar",      "0")
     pfUI:UpdateConfig("unitframes", unit,      "buff_indicator",   "0")
@@ -765,7 +765,7 @@ function pfUI:LoadConfig()
   pfUI:UpdateConfig("nameplates", nil,           "targetcastbar",    "0")
   pfUI:UpdateConfig("nameplates", nil,           "spellname",        "0")
   pfUI:UpdateConfig("nameplates", nil,           "showdebuffs",      "1")
-  pfUI:UpdateConfig("nameplates", nil,           "selfdebuff",       "0")
+  pfUI:UpdateConfig("nameplates", nil,           "debufffilter",     "off")
   pfUI:UpdateConfig("nameplates", nil,           "guessdebuffs",     "1")
   pfUI:UpdateConfig("nameplates", nil,           "clickthrough",     "0")
   pfUI:UpdateConfig("nameplates", nil,           "rightclick",       "1")
@@ -879,7 +879,6 @@ function pfUI:LoadConfig()
   pfUI:UpdateConfig("thirdparty", "bcs",         "enable",           "1")
   pfUI:UpdateConfig("thirdparty", "crafty",      "enable",           "1")
   pfUI:UpdateConfig("thirdparty", "clevermacro", "enable",           "1")
-  pfUI:UpdateConfig("thirdparty", "supercleveroidmacros", "enable",  "1")
   pfUI:UpdateConfig("thirdparty", "flightmap",   "enable",           "1")
   pfUI:UpdateConfig("thirdparty", "sheepwatch",  "enable",           "1")
   pfUI:UpdateConfig("thirdparty", "totemtimers", "enable",           "1")
@@ -1308,6 +1307,42 @@ function pfUI:MigrateConfig()
       pfUI_config.unitframes.combowidth = pfUI_config.unitframes.combosize
       pfUI_config.unitframes.comboheight = pfUI_config.unitframes.combosize
       pfUI_config.unitframes.combosize = nil
+    end
+  end
+
+  -- migrate selfdebuff/smartdebuff to debufffilter (> 6.2.3)
+  if checkversion(6, 2, 3) then
+    -- migrate unitframes
+    local unitframes = { "player", "target", "focus", "group", "grouptarget", "grouppet", "raid", "ttarget", "pet", "ptarget", "fallback", "tttarget" }
+    for _, unit in pairs(unitframes) do
+      if pfUI_config.unitframes[unit] then
+        if pfUI_config.unitframes[unit].smartdebuff == "1" then
+          pfUI_config.unitframes[unit].debufffilter = "smart"
+        elseif pfUI_config.unitframes[unit].selfdebuff == "1" then
+          pfUI_config.unitframes[unit].debufffilter = "own"
+        end
+        pfUI_config.unitframes[unit].selfdebuff = nil
+        pfUI_config.unitframes[unit].smartdebuff = nil
+      end
+    end
+    
+    -- migrate buffbar tdebuff
+    if pfUI_config.buffbar and pfUI_config.buffbar.tdebuff then
+      if pfUI_config.buffbar.tdebuff.smartdebuff == "1" then
+        pfUI_config.buffbar.tdebuff.debufffilter = "smart"
+      elseif pfUI_config.buffbar.tdebuff.selfdebuff == "1" then
+        pfUI_config.buffbar.tdebuff.debufffilter = "own"
+      end
+      pfUI_config.buffbar.tdebuff.selfdebuff = nil
+      pfUI_config.buffbar.tdebuff.smartdebuff = nil
+    end
+    
+    -- migrate nameplates
+    if pfUI_config.nameplates then
+      if pfUI_config.nameplates.selfdebuff == "1" then
+        pfUI_config.nameplates.debufffilter = "own"
+      end
+      pfUI_config.nameplates.selfdebuff = nil
     end
   end
 
