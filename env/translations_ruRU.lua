@@ -544,6 +544,7 @@ pfUI_translation["ruRU"] = {
   ["Only Count Bagspace On Regular Bags"] = "Подсчитывать только свободные места в сумках",
   ["Only Show Chat Dock On Mouseover"] = "Показывать панель чата только при наведении мыши",
   ["Only Show On Mouse Over"] = nil,
+  ["Only Show Own Debuffs (|cffffaaaaExperimental|r)"] = nil,
   ["Only Show Target Castbar"] = "Показать только панель применения цели",
   ["On State Change"] = "Изменение статуса",
   ["Options"] = "Опции",

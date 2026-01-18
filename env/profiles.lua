@@ -428,7 +428,7 @@ local slim = {
     ["tdebuff"] = {
       ["enable"] = "1",
       ["height"] = "14",
-      ["debufffilter"] = "own",
+      ["selfdebuff"] = "1",
     },
   },
   ["chat"] = {
@@ -547,7 +547,7 @@ local light = {
       ["height"] = "16",
       ["buffs"] = "TOPRIGHT",
       ["raidiconoffy"] = "6",
-      ["debufffilter"] = "own",
+      ["selfdebuff"] = "1",
       ["portrait"] = "right",
       ["width"] = "160",
       ["buffsize"] = "13.55",
@@ -757,7 +757,7 @@ local light = {
       ["enable"] = "1",
     },
     ["tdebuff"] = {
-      ["debufffilter"] = "own",
+      ["selfdebuff"] = "1",
       ["height"] = "12",
       ["enable"] = "1",
     },
@@ -776,7 +776,7 @@ local light = {
   },
   ["nameplates"] = {
     ["combatofftank"] = "0.5,0,0.7,1",
-    ["debufffilter"] = "own",
+    ["selfdebuff"] = "1",
     ["healthtexture"] = "Interface\\AddOns\\pfUI\\img\\bar_gradient",
     ["heighthealth"] = "10",
     ["health"] = {

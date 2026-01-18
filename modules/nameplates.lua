@@ -242,24 +242,10 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     for id = 1, 16 do
       local effect, _, texture, stacks, _, duration, timeleft
 
-      if unitstr and C.nameplates.debufffilter == "smart" then
-        effect, _, texture, stacks, _, duration, timeleft = libdebuff:UnitSmartDebuff(unitstr, id)
-      elseif unitstr and C.nameplates.debufffilter == "own" then
+      if unitstr and C.nameplates.selfdebuff == "1" then
         effect, _, texture, stacks, _, duration, timeleft = libdebuff:UnitOwnDebuff(unitstr, id)
       else
-        local caster
-        effect, _, texture, stacks, _, duration, timeleft, caster = libdebuff:UnitDebuff(unitstr, id)
-        
-        -- "Show All" mode: Only show timers for shared buffs/debuffs or own casts
-        if effect and timeleft then
-          local isShared = libdebuff:IsSharedAura(effect)
-          local isOwn = (caster == "player")
-          
-          -- Non-shared and not from player -> remove timer
-          if not isShared and not isOwn then
-            timeleft = nil
-          end
-        end
+        effect, _, texture, stacks, _, duration, timeleft = libdebuff:UnitDebuff(unitstr, id)
       end
 
       if effect and timeleft and timeleft > 0 then
@@ -938,24 +924,10 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       for i = 1, 16 do
         local effect, rank, texture, stacks, dtype, duration, timeleft
 
-        if unitstr and C.nameplates.debufffilter == "smart" and libdebuff then
-          effect, rank, texture, stacks, dtype, duration, timeleft = libdebuff:UnitSmartDebuff(unitstr, i)
-        elseif unitstr and C.nameplates.debufffilter == "own" and libdebuff then
+        if unitstr and C.nameplates.selfdebuff == "1" and libdebuff then
           effect, rank, texture, stacks, dtype, duration, timeleft = libdebuff:UnitOwnDebuff(unitstr, i)
         elseif unitstr and libdebuff then
-          local caster
-          effect, rank, texture, stacks, dtype, duration, timeleft, caster = libdebuff:UnitDebuff(unitstr, i)
-          
-          -- "Show All" mode: Only show timers for shared buffs/debuffs or own casts
-          if effect and timeleft then
-            local isShared = libdebuff:IsSharedAura(effect)
-            local isOwn = (caster == "player")
-            
-            -- Non-shared and not from player -> remove timer
-            if not isShared and not isOwn then
-              timeleft = nil
-            end
-          end
+          effect, rank, texture, stacks, dtype, duration, timeleft = libdebuff:UnitDebuff(unitstr, i)
         elseif plate.verify == verify then
           effect, rank, texture, stacks, dtype, duration, timeleft = plate:UnitDebuff(i)
         end
@@ -1008,9 +980,21 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     local nameplate = frame.nameplate
     local now = GetTime()  -- Cache GetTime() once per update
     
-    -- OPTIMIZED: Smooth updates for castbars and targeting
+    -- Performance: Skip updates for invisible nameplates
+    local isVisible = frame:IsVisible()
+    if not isVisible then return end
+    
+    -- Intelligent throttling based on target and castbar status
     local target = UnitExists("target") and frame:GetAlpha() >= 0.99 or nil
-    local throttle = target and 0.02 or 0.025  -- Target: 50 FPS, Non-Target: 20 FPS
+    local isCasting = nameplate.castbar and nameplate.castbar:IsShown()
+    
+    -- Castbars need smooth 50 FPS, regular healthbars only need 10 FPS
+    local throttle
+    if target or isCasting then
+      throttle = 0.02  -- 50 FPS for target OR active castbar
+    else
+      throttle = 0.1   -- 10 FPS for non-target nameplates (health updates only)
+    end
     
     if (nameplate.lasttick or 0) + throttle > now then return end
     nameplate.lasttick = now

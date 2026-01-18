@@ -544,6 +544,7 @@ pfUI_translation["koKR"] = {
   ["Only Count Bagspace On Regular Bags"] = nil,
   ["Only Show Chat Dock On Mouseover"] = "마우스 오버시 채팅 독만 표시",
   ["Only Show On Mouse Over"] = nil,
+  ["Only Show Own Debuffs (|cffffaaaaExperimental|r)"] = nil,
   ["Only Show Target Castbar"] = nil,
   ["On State Change"] = nil,
   ["Options"] = nil,

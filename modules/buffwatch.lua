@@ -2,10 +2,6 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
   local rawborder, border = GetBorderSize("panels")
   local scanner = libtipscan:GetScanner("buffwatch")
 
-  -- Track last logged state to prevent spam
-  local lastLoggedState = {}  -- [unit][debuffName] = {target, timeleft, time}
-  local LOG_COOLDOWN = 1.0  -- Minimum 1 second between same messages
-
   local fcache = {}
   local function BuffIsVisible(config, name)
     -- return if all buffs should be shown
@@ -78,7 +74,7 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
     return anchor
   end
 
-  local function GetBuffData(unit, id, type, debufffilter)
+  local function GetBuffData(unit, id, type, selfdebuff)
     if unit == "player" then
       local bid = GetPlayerBuff(PLAYER_BUFF_START_ID+id, type)
       local stacks = GetPlayerBuffApplications(bid)
@@ -92,75 +88,11 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
       end
 
       return remaining, texture, name, stacks
-    elseif libdebuff and debufffilter == "smart" then
-      local name, rank, texture, stacks, dtype, duration, timeleft = libdebuff:UnitSmartDebuff(unit, id)
-      return timeleft, texture, name, stacks
-    elseif libdebuff and debufffilter == "own" then
+    elseif libdebuff and selfdebuff then
       local name, rank, texture, stacks, dtype, duration, timeleft = libdebuff:UnitOwnDebuff(unit, id)
       return timeleft, texture, name, stacks
     elseif libdebuff then
-      local name, rank, texture, stacks, dtype, duration, timeleft, caster = libdebuff:UnitDebuff(unit, id)
-      
-      -- "Show All" mode: Only show timers for shared buffs/debuffs or own casts
-      if debufffilter == "off" and name then
-        local isShared = libdebuff:IsSharedAura(name)
-        local isOwn = (caster == "player")
-        
-        -- Smart Debug output: Only log when something changes
-        if libdebuff.IsDebugEnabled and libdebuff:IsDebugEnabled() then
-          local currentTarget = UnitName(unit) or "unknown"
-          local currentTime = GetTime()
-          
-          -- Initialize tracking for this unit
-          if not lastLoggedState[unit] then
-            lastLoggedState[unit] = {}
-          end
-          
-          local lastState = lastLoggedState[unit][name]
-          local shouldLog = false
-          local logReason = ""
-          
-          if not lastState then
-            -- First time seeing this debuff
-            shouldLog = true
-            logReason = "NEW"
-          elseif lastState.target ~= currentTarget then
-            -- Target changed
-            shouldLog = true
-            logReason = "TARGET CHANGED"
-          elseif timeleft and lastState.timeleft then
-            -- Check if timer was refreshed (increased significantly)
-            local timeDiff = timeleft - lastState.timeleft
-            local timeSinceLastLog = currentTime - (lastState.time or 0)
-            
-            if timeDiff > 3 and timeSinceLastLog > LOG_COOLDOWN then
-              -- Timer refreshed by more than 3 seconds
-              shouldLog = true
-              logReason = "REFRESHED (+" .. string.format("%.1f", timeDiff) .. "s)"
-            end
-          end
-          
-          if shouldLog then
-            DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[BUFFWATCH]|r " .. name .. " | " .. logReason .. " | Filter: " .. (debufffilter or "nil") .. " | Shared: " .. tostring(isShared) .. " | Own: " .. tostring(isOwn) .. " | Caster: " .. tostring(caster) .. " | Timer: " .. tostring(timeleft and string.format("%.1f", timeleft) or "nil"))
-            
-            -- Update last logged state
-            lastLoggedState[unit][name] = {
-              target = currentTarget,
-              timeleft = timeleft,
-              time = currentTime
-            }
-          end
-        end
-        
-        -- Non-shared and not from player -> remove timer
-        if not isShared and not isOwn then
-          timeleft = -1  -- Use -1 instead of nil to indicate "no timer"
-          
-          -- Don't spam "Timer REMOVED" messages for other players' debuffs
-          -- (These are already filtered out by the timer removal above)
-        end
-      end
-      
+      local name, rank, texture, stacks, dtype, duration, timeleft = libdebuff:UnitDebuff(unit, id)
       return timeleft, texture, name, stacks
     end
   end
@@ -299,10 +231,10 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
 
   local function RefreshBuffBarFrame(frame)
     -- reinitialize all active buffs
-    local debufffilter = frame.config.debufffilter
+    local selfdebuff = frame.config.selfdebuff == "1"
 
     for i=1,32 do
-      local timeleft, texture, name, stacks = GetBuffData(frame.unit, i, frame.type, debufffilter)
+      local timeleft, texture, name, stacks = GetBuffData(frame.unit, i, frame.type, selfdebuff)
       timeleft = timeleft or 0
 
       if texture and name and name ~= "" and BuffIsVisible(frame.config, name) then
