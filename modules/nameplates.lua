@@ -56,7 +56,8 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   }
 
   -- catch all nameplates
-  local childs, regions, plate
+  local childs = {}  -- PERF: Reuse table instead of creating new one each scan
+  local regions, plate
   local initialized = 0
   local parentcount = 0
   local platecount = 0
@@ -408,8 +409,12 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   end)
 
   nameplates:SetScript("OnUpdate", function()
-    -- Throttle main scanner to reasonable rate
-    if (this.tick or 0) > GetTime() then return else this.tick = GetTime() + 0.05 end
+    -- PERF: Cache GetTime() once per frame
+    local now = GetTime()
+
+    -- Throttle main scanner - increase to 0.1s in combat for better raid performance
+    local throttle = nameplates.combat.inCombat and 0.1 or 0.05
+    if (this.tick or 0) > now then return else this.tick = now + throttle end
 
     -- propagate events to all nameplates
     if this.eventcache then
@@ -422,10 +427,16 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     -- detect new nameplates
     parentcount = WorldFrame:GetNumChildren()
     if initialized < parentcount then
-      childs = { WorldFrame:GetChildren() }
+      -- PERF: Only rebuild table when new children detected (not every frame)
+      -- This still creates a temporary table but only when new nameplates appear
+      local newchilds = { WorldFrame:GetChildren() }
+      for i = 1, parentcount do
+        childs[i] = newchilds[i]
+      end
+
       for i = initialized + 1, parentcount do
         plate = childs[i]
-        if IsNamePlate(plate) and not registry[plate] then
+        if plate and IsNamePlate(plate) and not registry[plate] then
           nameplates.OnCreate(plate)
           registry[plate] = plate
         end
@@ -587,6 +598,9 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   nameplates.OnConfigChange = function(frame)
     local parent = frame
     local nameplate = frame.nameplate
+
+    -- Reset cached alpha to force update on next OnUpdate
+    nameplate.cachedAlpha = nil
 
     local font = C.nameplates.use_unitfonts == "1" and pfUI.font_unit or pfUI.font_default
     local font_size = C.nameplates.use_unitfonts == "1" and C.global.font_unit_size or C.global.font_size
@@ -819,18 +833,21 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     plate.name:SetText(GetNameString(name))
     plate.level:SetText(string.format("%s%s", level, (elitestrings[elite] or "")))
     
+    -- Get inactive alpha for this plate
+    local plateAlpha = plate.inactiveAlpha or 1
+
     -- Set level color from GetDifficultyColor when using DB level
     if levelFromDB and type(level) == "number" then
       local color = GetDifficultyColor(level)
-      plate.level:SetTextColor(color.r + 0.3, color.g + 0.3, color.b + 0.3, 1)
+      plate.level:SetTextColor(color.r + 0.3, color.g + 0.3, color.b + 0.3, plateAlpha)
     end
 
     if guild and C.nameplates.showguildname == "1" then
       plate.guild:SetText(guild)
       if guild == GetGuildInfo("player") then
-        plate.guild:SetTextColor(0, 0.9, 0, 1)
+        plate.guild:SetTextColor(0, 0.9, 0, plateAlpha)
       else
-        plate.guild:SetTextColor(0.8, 0.8, 0.8, 1)
+        plate.guild:SetTextColor(0.8, 0.8, 0.8, plateAlpha)
       end
       plate.guild:Show()
     else
@@ -893,13 +910,31 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       end
     end
 
-    if r ~= plate.cache.r or g ~= plate.cache.g or b ~= plate.cache.b then
-      plate.health:SetStatusBarColor(r, g, b, a)
+    -- Apply inactive alpha to colors (plateAlpha is defined earlier in this function)
+    if r ~= plate.cache.r or g ~= plate.cache.g or b ~= plate.cache.b or plate.cache.plateAlpha ~= plateAlpha then
+      plate.health:SetStatusBarColor(r, g, b, plateAlpha)
       plate.cache.r, plate.cache.g, plate.cache.b = r, g, b
+      plate.cache.plateAlpha = plateAlpha
+
+      -- Also apply to backdrop
+      if plate.health.backdrop then
+        plate.health.backdrop:SetBackdropColor(0, 0, 0, plateAlpha * 0.8)
+        plate.health.backdrop:SetBackdropBorderColor(er, eg, eb, plateAlpha)
+      end
+
+      -- Apply to name
+      local nr, ng, nb = plate.name:GetTextColor()
+      plate.name:SetTextColor(nr, ng, nb, plateAlpha)
+
+      -- Apply to level
+      if plate.level then
+        local lr, lg, lb = plate.level:GetTextColor()
+        plate.level:SetTextColor(lr, lg, lb, plateAlpha)
+      end
     end
 
     if r + g + b ~= plate.cache.namecolor and unittype == "FRIENDLY_PLAYER" and C.nameplates["friendclassnamec"] == "1" and class and RAID_CLASS_COLORS[class] then
-      plate.name:SetTextColor(r, g, b, a)
+      plate.name:SetTextColor(r, g, b, plateAlpha)
       plate.cache.namecolor = r + g + b
     end
 
@@ -979,22 +1014,22 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     local frame = frame or this
     local nameplate = frame.nameplate
     local now = GetTime()
-    
+
     -- Performance: Skip invisible frames immediately
     local isVisible = frame:IsVisible()
     if not isVisible then return end
-    
+
     -- Intelligent throttling based on target/castbar status
     local target = UnitExists("target") and frame:GetAlpha() >= 0.99 or nil
     local isCasting = nameplate.castbar and nameplate.castbar:IsShown()
-    
+
     local throttle
     if target or isCasting then
       throttle = 0.02  -- 50 FPS for target OR active castbar
     else
       throttle = 0.1   -- 10 FPS for others (healthbar updates)
     end
-    
+
     if (nameplate.lasttick or 0) + throttle > now then return end
     nameplate.lasttick = now
     
@@ -1064,17 +1099,18 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
 
     -- trigger update when name color changed
     local r, g, b = original.name:GetTextColor()
+    local npAlpha = nameplate.inactiveAlpha or 1
     if r + g + b ~= nameplate.cache.namecolor then
       nameplate.cache.namecolor = r + g + b
 
       if namefightcolor then
         if r > .9 and g < .2 and b < .2 then
-          nameplate.name:SetTextColor(1,0.4,0.2,1)
+          nameplate.name:SetTextColor(1,0.4,0.2,npAlpha)
         else
-          nameplate.name:SetTextColor(r,g,b,1)
+          nameplate.name:SetTextColor(r,g,b,npAlpha)
         end
       else
-        nameplate.name:SetTextColor(1,1,1,1)
+        nameplate.name:SetTextColor(1,1,1,npAlpha)
       end
       update = true
     end
@@ -1084,14 +1120,15 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     r, g, b = r + .3, g + .3, b + .3
     if r + g + b ~= nameplate.cache.levelcolor then
       nameplate.cache.levelcolor = r + g + b
-      nameplate.level:SetTextColor(r,g,b,1)
+      nameplate.level:SetTextColor(r,g,b,npAlpha)
       update = true
     end
 
-    -- scan for debuff timeouts
+    -- PERF: scan for debuff timeouts using indexed access instead of pairs()
     if nameplate.debuffcache then
-      for id, data in pairs(nameplate.debuffcache) do
-        if ( not data.stop or data.stop < now ) and not data.empty then
+      for id = 1, 16 do
+        local data = nameplate.debuffcache[id]
+        if data and ( not data.stop or data.stop < now ) and not data.empty then
           data.empty = true
           update = true
         end

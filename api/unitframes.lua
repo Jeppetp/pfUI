@@ -166,7 +166,8 @@ end)
 
 local aggrodata = { }
 function pfUI.api.UnitHasAggro(unit)
-  if aggrodata[unit] and GetTime() < aggrodata[unit].check + 1 then
+  -- Only cache positive results to allow instant detection when aggro changes
+  if aggrodata[unit] and aggrodata[unit].state > 0 and GetTime() < aggrodata[unit].check + 1 then
     return aggrodata[unit].state
   end
 
@@ -192,7 +193,7 @@ function pfUI.api.UnitHasAggro(unit)
   return aggrodata[unit].state
 end
 
-pfUI.uf.glow = CreateFrame("Frame")
+pfUI.uf.glow = CreateFrame("Frame", nil, UIParent)
 pfUI.uf.glow:SetScript("OnUpdate", function()
   local fpsmod = GetFramerate() / 30
   if not this.val or this.val >= .8 then
@@ -204,10 +205,13 @@ pfUI.uf.glow:SetScript("OnUpdate", function()
 end)
 
 pfUI.uf.glow.mod = 0
-pfUI.uf.glow.val = 0
+pfUI.uf.glow.val = 0.6
 
 function pfUI.uf.glow.UpdateGlowAnimation()
-  this:SetAlpha(pfUI.uf.glow.val)
+  local val = pfUI.uf.glow.val or 0.6
+  if val < 0.4 then val = 0.4 end
+  if val > 0.8 then val = 0.8 end
+  this:SetAlpha(val)
 end
 
 local detect_icon, detect_name
@@ -1113,11 +1117,18 @@ function pfUI.uf.OnUpdate()
     pfUI.uf:RefreshUnitState(this)
     pfUI.uf:RefreshIndicators(this)
 
-    if this.config.glowaggro == "1" and pfUI.api.UnitHasAggro(this.label .. this.id) > 0 then
-      this.glow:SetBackdropBorderColor(1,.2,0)
+    local unitstr = (this.label or "") .. (this.id or "")
+    if unitstr == "" then unitstr = nil end
+    local hasAggro = unitstr and this.config.glowaggro == "1" and pfUI.api.UnitHasAggro(unitstr) > 0
+    local inCombat = unitstr and this.config.glowcombat == "1" and UnitAffectingCombat(unitstr)
+
+    if hasAggro then
+      this.glow:SetBackdropBorderColor(1,.2,0,1)
+      this.glow:SetAlpha(0.8)
       this.glow:Show()
-    elseif this.config.glowcombat == "1" and UnitAffectingCombat(this.label .. this.id) then
-      this.glow:SetBackdropBorderColor(1,1,.2)
+    elseif inCombat then
+      this.glow:SetBackdropBorderColor(1,1,.2,1)
+      this.glow:SetAlpha(0.8)
       this.glow:Show()
     else
       this.glow:Hide()
@@ -1269,14 +1280,14 @@ function pfUI.uf:CreateUnitFrame(unit, id, config, tick)
   f.GetColor         = pfUI.uf.GetColor
 
   -- cache values to the frame
-  f.label = unit
+  f.label = strlower(unit)
   f.fname = fname
   f.id = id
   f.config = config or pfUI_config.unitframes.fallback
   f.tick = tick
 
   -- disable events for unknown unitstrings
-  if not pfValidUnits[unit .. id] then
+  if not pfValidUnits[strlower(unit) .. id] then
     f.unitname = unit
     f.label, f.id = "", ""
     f.RegisterEvent = function() return end
