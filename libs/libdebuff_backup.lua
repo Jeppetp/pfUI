@@ -158,13 +158,6 @@ local function GetPlayerGUID()
   return playerGUID
 end
 
--- Helper function: Check if GUID is current target (for debug filtering)
-local function IsCurrentTarget(guid)
-  if not guid or not UnitExists then return false end
-  local _, targetGuid = UnitExists("target")
-  return targetGuid == guid
-end
-
 -- Shift all slots down after a removal
 local function ShiftSlotsDown(guid, removedSlot)
   if debugStats.enabled then
@@ -253,94 +246,14 @@ end
 local function CleanupOrphanedDebuffs(guid)
   if not ownDebuffs[guid] then return end
   
-  local toDelete = {}
-  
   for spell, data in pairs(ownDebuffs[guid]) do
     local timeleft = (data.startTime + data.duration) - GetTime()
     local expired = timeleft < 0
     local noSlotTooLong = not data.slot and (GetTime() - data.startTime) > 2
     
     if expired or noSlotTooLong then
-      if debugStats.enabled and IsCurrentTarget(guid) and noSlotTooLong then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[CLEANUP DELETED]|r %s slot=nil age=%.1fs", 
-          spell, GetTime() - data.startTime))
-      end
-      -- Mark for deletion AFTER iteration
-      table.insert(toDelete, spell)
+      ownDebuffs[guid][spell] = nil
     end
-  end
-  
-  -- Delete AFTER iteration (prevents iterator corruption)
-  for _, spell in ipairs(toDelete) do
-    ownDebuffs[guid][spell] = nil
-  end
-end
-
--- Initial scan of all debuff slots on target change
-local function InitializeTargetSlots(guid)
-  if not guid or not GetUnitField or not SpellInfo then return end
-  
-  -- Clear existing slots for this target
-  allSlots[guid] = {}
-  
-  if debugStats.enabled then
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[INITIAL SCAN]|r Scanning target GUID=%s", DebugGuid(guid)))
-  end
-  
-  local myGuid = GetPlayerGUID()
-  local slotCount = 0
-  
-  -- Get all auras (buffs + debuffs) for this unit
-  local auras = GetUnitField(guid, "aura")
-  if not auras then 
-    if debugStats.enabled then
-      DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[INITIAL SCAN]|r GetUnitField failed!")
-    end
-    return 
-  end
-  
-  -- Scan debuff slots only (aura slots 33-48 = debuff slots 1-16)
-  for auraSlot = 33, 48 do
-    local spellId = auras[auraSlot]
-    
-    if spellId and spellId > 0 then
-      -- Get spell name from ID
-      local spellName = SpellInfo(spellId)
-      
-      if spellName and spellName ~= "" then
-        slotCount = slotCount + 1
-        
-        -- Convert aura slot (33-48) to debuff slot (1-16)
-        local debuffSlot = auraSlot - 32
-        
-        -- Check if this is our debuff
-        local isOurs = false
-        if ownDebuffs[guid] and ownDebuffs[guid][spellName] then
-          isOurs = true
-          -- Update slot in ownDebuffs
-          ownDebuffs[guid][spellName].slot = debuffSlot
-          -- Update ownSlots
-          ownSlots[guid] = ownSlots[guid] or {}
-          ownSlots[guid][debuffSlot] = spellName
-        end
-        
-        -- Add to allSlots (using debuff slot numbering)
-        allSlots[guid][debuffSlot] = {
-          spellName = spellName,
-          casterGuid = isOurs and myGuid or nil, -- We only know caster for our debuffs
-          isOurs = isOurs
-        }
-        
-        if debugStats.enabled then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[SLOT INIT]|r slot=%d %s (ID=%d) isOurs=%s", 
-            debuffSlot, spellName, spellId, tostring(isOurs)))
-        end
-      end
-    end
-  end
-  
-  if debugStats.enabled then
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[INITIAL SCAN DONE]|r Found %d debuff slots", slotCount))
   end
 end
 
@@ -800,7 +713,7 @@ function libdebuff:UnitDebuff(unit, id)
       local now = GetTime()
       local shouldLog = false
       
-      if debugStats.enabled and IsCurrentTarget(guid) then
+      if debugStats.enabled then
         if not lastUnitDebuffLog[logKey] then
           shouldLog = true
         elseif (now - lastUnitDebuffLog[logKey].time) > UNITDEBUFF_LOG_THROTTLE then
@@ -886,30 +799,18 @@ function libdebuff:UnitOwnDebuff(unit, id)
       for k in pairs(cache) do cache[k] = nil end
       
       local count = 1
-      local toDelete = {}
-      
       for spellName, data in pairs(ownDebuffs[guid]) do
         local timeleft = (data.startTime + data.duration) - GetTime()
-        
-        -- Grace period: keep debuff visible for 1s after expiry to prevent flicker
-        if timeleft > -1 then
+        if timeleft > 0 then
           cache[spellName] = true
           if count == id then
             local texture = data.texture or "Interface\\Icons\\Spell_Shadow_CurseOfTongues"
-            -- Return 0 for timeleft if expired, but keep it in the list
-            local displayTimeleft = timeleft > 0 and timeleft or 0
-            return spellName, data.rank, texture, 1, nil, data.duration, displayTimeleft, "player"
+            return spellName, data.rank, texture, 1, nil, data.duration, timeleft, "player"
           end
           count = count + 1
         else
-          -- Mark for deletion AFTER iteration (prevents iterator corruption)
-          table.insert(toDelete, spellName)
+          ownDebuffs[guid][spellName] = nil
         end
-      end
-      
-      -- Delete expired entries AFTER iteration
-      for _, spellName in ipairs(toDelete) do
-        ownDebuffs[guid][spellName] = nil
       end
     end
     return nil
@@ -922,6 +823,27 @@ function libdebuff:UnitOwnDebuff(unit, id)
     local effect, rank, texture, stacks, dtype, duration, timeleft, caster = libdebuff:UnitDebuff(unit, i)
     if effect and not cache[effect] and caster and caster == "player" then
       cache[effect] = true
+      if count == id then
+        return effect, rank, texture, stacks, dtype, duration, timeleft, caster
+      else
+        count = count + 1
+      end
+    end
+  end
+end
+
+local cache = {}
+function libdebuff:UnitOwnDebuff(unit, id)
+  -- clean cache
+  for k, v in pairs(cache) do cache[k] = nil end
+
+  -- detect own debuffs
+  local count = 1
+  for i=1,16 do
+    local effect, rank, texture, stacks, dtype, duration, timeleft, caster = libdebuff:UnitDebuff(unit, i)
+    if effect and not cache[effect] and caster and caster == "player" then
+      cache[effect] = true
+
       if count == id then
         return effect, rank, texture, stacks, dtype, duration, timeleft, caster
       else
@@ -950,7 +872,6 @@ if hasNampower then
   frame:RegisterEvent("AURA_CAST_ON_OTHER")
   frame:RegisterEvent("DEBUFF_ADDED_OTHER")
   frame:RegisterEvent("DEBUFF_REMOVED_OTHER")
-  frame:RegisterEvent("PLAYER_TARGET_CHANGED")
   
   frame:SetScript("OnEvent", function()
     if event == "PLAYER_ENTERING_WORLD" then
@@ -1030,14 +951,14 @@ if hasNampower then
         allAuraCasts[targetGuid] = allAuraCasts[targetGuid] or {}
         allAuraCasts[targetGuid][spellName] = allAuraCasts[targetGuid][spellName] or {}
         
-        if debugStats.enabled and IsCurrentTarget(targetGuid) then
+        if debugStats.enabled then
           DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[AURA_CAST STORE]|r %s caster=%s isOurs=%s", 
             spellName, DebugGuid(casterGuid), tostring(isOurs)))
         end
         
         -- Check if this is a self-overwrite spell (clears all OTHER casters)
         if selfOverwriteDebuffs[spellName] then
-          if debugStats.enabled and IsCurrentTarget(targetGuid) then
+          if debugStats.enabled then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[SELF-OVERWRITE CHECK]|r %s is in selfOverwriteDebuffs", spellName))
           end
           
@@ -1162,31 +1083,13 @@ if hasNampower then
       end
       
       -- Store in ownDebuffs (slot will be set by DEBUFF_ADDED)
-      local existingStartTime = existing and existing.startTime
-      
-      -- UPDATE existing table instead of replacing it (prevents iterator race condition)
-      if not ownDebuffs[targetGuid][spellName] then
-        ownDebuffs[targetGuid][spellName] = {}
-      end
-      
-      local data = ownDebuffs[targetGuid][spellName]
-      data.startTime = startTime
-      data.duration = duration
-      data.texture = texture
-      data.rank = spellRankString
-      -- Keep existing slot if present (only set to nil on first creation)
-      if not data.slot then
-        data.slot = nil -- Will be set by DEBUFF_ADDED_OTHER
-      end
-      
-      -- Debug: Track when startTime changes
-      if debugStats.enabled and IsCurrentTarget(targetGuid) and existingStartTime then
-        local timeDiff = startTime - existingStartTime
-        if timeDiff > 0.1 then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[STARTTIME UPDATED]|r %s old=%.2f new=%.2f diff=+%.2fs", 
-            spellName, existingStartTime, startTime, timeDiff))
-        end
-      end
+      ownDebuffs[targetGuid][spellName] = {
+        startTime = startTime,
+        duration = duration,
+        texture = texture,
+        rank = spellRankString,
+        slot = nil -- Will be set by DEBUFF_ADDED_OTHER
+      }
       
       -- Check if this spell overwrites another variant for OUR debuffs
       if debuffOverwritePairs[spellName] then
@@ -1253,7 +1156,7 @@ if hasNampower then
       local spellName = SpellInfo and SpellInfo(spellId)
       if not spellName then return end
       
-      if debugStats.enabled and IsCurrentTarget(guid) then
+      if debugStats.enabled then
         DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[DEBUFF_ADDED]|r slot=%d %s stacks=%d guid=%s", 
           slot, spellName, stacks, DebugGuid(guid)))
       end
@@ -1331,7 +1234,7 @@ if hasNampower then
         isOurs = isOurs
       }
       
-      if debugStats.enabled and IsCurrentTarget(guid) then
+      if debugStats.enabled then
         DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[ALLSLOTS SET]|r slot=%d %s caster=%s isOurs=%s", 
           slot, spellName, DebugGuid(casterGuid), tostring(isOurs)))
       end
@@ -1359,18 +1262,8 @@ if hasNampower then
       if ownSlots[guid] and ownSlots[guid][slot] == spellName then
         wasOurs = true
         ownSlots[guid][slot] = nil
-        
-        -- Only delete from ownDebuffs if NOT recently renewed
-        if ownDebuffs[guid] and ownDebuffs[guid][spellName] then
-          local age = GetTime() - ownDebuffs[guid][spellName].startTime
-          
-          -- If renewed within last 1s, DON'T delete (prevents flicker)
-          if age > 1 then
-            ownDebuffs[guid][spellName] = nil
-          elseif debugStats.enabled and IsCurrentTarget(guid) then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[RENEWAL SKIP DELETE]|r %s age=%.2fs - kept in ownDebuffs", 
-              spellName, age))
-          end
+        if ownDebuffs[guid] then
+          ownDebuffs[guid][spellName] = nil
         end
       end
       
@@ -1379,7 +1272,7 @@ if hasNampower then
         local slotData = allSlots[guid][slot]
         local removedCasterGuid = slotData.casterGuid
         
-        if debugStats.enabled and IsCurrentTarget(guid) then
+        if debugStats.enabled then
           DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[DEBUFF_REMOVED]|r slot=%d %s caster=%s", 
             slot, spellName, DebugGuid(removedCasterGuid)))
         end
@@ -1389,11 +1282,11 @@ if hasNampower then
           if allAuraCasts[guid][spellName][removedCasterGuid] then
             allAuraCasts[guid][spellName][removedCasterGuid] = nil
             
-            if debugStats.enabled and IsCurrentTarget(guid) then
+            if debugStats.enabled then
               DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[AURACAST CLEARED]|r Removed %s for caster %s from allAuraCasts", 
                 spellName, DebugGuid(removedCasterGuid)))
             end
-          elseif debugStats.enabled and IsCurrentTarget(guid) then
+          elseif debugStats.enabled then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[AURACAST MISSING]|r %s caster %s not found in allAuraCasts", 
               spellName, DebugGuid(removedCasterGuid)))
           end
@@ -1415,15 +1308,6 @@ if hasNampower then
       
       -- Cleanup
       CleanupOrphanedDebuffs(guid)
-      
-    elseif event == "PLAYER_TARGET_CHANGED" then
-      -- Initialize slots when targeting a new unit
-      if not UnitExists then return end
-      local _, targetGuid = UnitExists("target")
-      
-      if targetGuid and targetGuid ~= "" and targetGuid ~= "0x0000000000000000" then
-        InitializeTargetSlots(targetGuid)
-      end
     end
     
     -- Periodic cleanup (every event)
