@@ -1791,15 +1791,10 @@ function pfUI.uf:RefreshUnit(unit, component)
     local pos = 1
     if table.getn(unit.indicators) > 0 then
       for i=1,32 do
-        local texture, count, timeleft, name, _
-        
-        -- Use libdebuff for Vanilla (respects Rank Protection!)
+        local texture, count = UnitBuff(unitstr, i)
+        local timeleft, _
         if pfUI.client > 11200 then
-          name, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
-        elseif libdebuff then
-          name, _, texture, count, _, _, timeleft = libdebuff:UnitBuff(unitstr, i)
-        else
-          texture, count = UnitBuff(unitstr, i)
+          _, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
         end
 
         if texture then
@@ -1807,21 +1802,7 @@ function pfUI.uf:RefreshUnit(unit, component)
           for _, filter in pairs(unit.indicators) do
             if filter == string.lower(texture) then
               if string.lower(texture) == "interface\\icons\\spell_nature_rejuvenation" then
-                -- Debug nur alle 0.5 Sekunden
-                if not self.lastIndicatorDebug then self.lastIndicatorDebug = 0 end
-                if (GetTime() - self.lastIndicatorDebug) > 0.5 then
-                  DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[INDICATOR REJUV]|r name=%s timeleft=%.1f", name or "nil", timeleft or -1))
-                  self.lastIndicatorDebug = GetTime()
-                end
-                
                 local start, duration, prediction = libpredict:GetHotDuration(unitstr, "Reju")
-                
-                if not self.lastPredictDebug then self.lastPredictDebug = 0 end
-                if (GetTime() - self.lastPredictDebug) > 0.5 then
-                  DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[INDICATOR USING]|r libpredict prediction=%.1f (ignoring libdebuff timeleft!)", prediction or -1))
-                  self.lastPredictDebug = GetTime()
-                end
-                
                 pfUI.uf:AddIcon(unit, pos, texture, timeleft or prediction, count, tonumber(start), tonumber(duration))
                 pos = pos + 1
                 break
@@ -1850,20 +1831,17 @@ function pfUI.uf:RefreshUnit(unit, component)
       scanner = scanner or libtipscan:GetScanner("unitframes")
 
       for i=1,32 do -- scan for custom buffs
-        local texture, count, timeleft, name, _
-        
-        -- Use libdebuff for Vanilla (respects Rank Protection!)
-        if pfUI.client > 11200 then
-          name, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
-        elseif libdebuff then
-          name, _, texture, count, _, _, timeleft = libdebuff:UnitBuff(unitstr, i)
-        else
-          texture, count = UnitBuff(unitstr, i)
-          scanner:SetUnitBuff(unitstr, i)
-          name = scanner:Line(1) or ""
-        end
-
+        local texture, count = UnitBuff(unitstr, i)
         if texture then
+          local timeleft, name, _
+          if pfUI.client > 11200 then
+            name, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
+          else
+            scanner:SetUnitBuff(unitstr, i)
+            name = scanner:Line(1) or ""
+          end
+
+          -- match filter
           for _, filter in pairs(unit.indicator_custom) do
             if filter == string.lower(name) then
               pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
