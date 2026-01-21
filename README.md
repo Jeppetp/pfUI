@@ -457,9 +457,7 @@ Please help test these scenarios and report bugs:
 ## 📚 Documentation
 
 **For Developers:**
-- See `/docs/libdebuff_architecture.md` (coming soon)
-- Event flow diagram (coming soon)
-- Table structure documentation (coming soon)
+- See `/docs/ANALYSIS_COMPARISON.md`
 
 **For Users:**
 - FAQ: Why is this experimental?
