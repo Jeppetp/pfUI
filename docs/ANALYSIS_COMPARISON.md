@@ -320,18 +320,6 @@ end
 
 ---
 
-## 📋 What's NOT in Experiment (vs Master 6.2.5)
-
-❌ **Friendly Zone Nameplate Disable** - Master has this, Experiment doesn't
-- Feature: "Disable Hostile Nameplates In Friendly Zones"
-- Feature: "Disable Friendly Nameplates In Friendly Zones"
-
-**Why:** Experiment branched before this feature was added.
-
-**Solution:** Merge from Master 6.2.5 if needed.
-
----
-
 ## 🏆 Final Verdict
 
 ### Performance Ranking
