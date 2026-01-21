@@ -12,6 +12,12 @@ This version includes significant performance improvements, DLL-enhanced feature
 
 > **Looking for TBC support?** Visit the original pfUI by Shagu: [https://github.com/shagu/pfUI](https://github.com/shagu/pfUI)
 
+
+---
+## What's New in Version 7.0.0 (experimental) (January 11, 2026)
+
+- MORE INFOS COMING SOON!!!
+
 ---
 ## What's New in Version 6.2.3 (January 11, 2026)
 
