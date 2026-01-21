@@ -165,6 +165,11 @@ local function IsCurrentTarget(guid)
   return targetGuid == guid
 end
 
+-- Helper function: Format timestamp for debug output
+local function GetDebugTimestamp()
+  return string.format("[%.3f]", GetTime())
+end
+
 -- Shift all slots down after a removal
 local function ShiftSlotsDown(guid, removedSlot)
   if debugStats.enabled then
@@ -284,7 +289,7 @@ local function InitializeTargetSlots(guid)
   allSlots[guid] = {}
   
   if debugStats.enabled then
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[INITIAL SCAN]|r Scanning target GUID=%s", DebugGuid(guid)))
+    DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[INITIAL SCAN]|r Scanning target GUID=%s", GetDebugTimestamp(), DebugGuid(guid)))
   end
   
   local myGuid = GetPlayerGUID()
@@ -340,7 +345,7 @@ local function InitializeTargetSlots(guid)
   end
   
   if debugStats.enabled then
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[INITIAL SCAN DONE]|r Found %d debuff slots", slotCount))
+    DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[INITIAL SCAN DONE]|r Found %d debuff slots", GetDebugTimestamp(), slotCount))
   end
 end
 
@@ -812,8 +817,8 @@ function libdebuff:UnitDebuff(unit, id)
         
         if shouldLog then
           lastUnitDebuffLog[logKey] = {time = now, caster = slotData.casterGuid}
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[UNITDEBUFF READ]|r slot=%d %s isOurs=%s caster=%s", 
-            id, spellName, tostring(isOurs), DebugGuid(slotData.casterGuid)))
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[UNITDEBUFF READ]|r slot=%d %s isOurs=%s caster=%s", 
+            GetDebugTimestamp(), id, spellName, tostring(isOurs), DebugGuid(slotData.casterGuid)))
         end
       end
       
@@ -1031,8 +1036,8 @@ if hasNampower then
         allAuraCasts[targetGuid][spellName] = allAuraCasts[targetGuid][spellName] or {}
         
         if debugStats.enabled and IsCurrentTarget(targetGuid) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[AURA_CAST STORE]|r %s caster=%s isOurs=%s", 
-            spellName, DebugGuid(casterGuid), tostring(isOurs)))
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[AURA_CAST STORE]|r %s caster=%s isOurs=%s", 
+            GetDebugTimestamp(), spellName, DebugGuid(casterGuid), tostring(isOurs)))
         end
         
         -- Check if this is a self-overwrite spell (clears all OTHER casters)
@@ -1254,8 +1259,8 @@ if hasNampower then
       if not spellName then return end
       
       if debugStats.enabled and IsCurrentTarget(guid) then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[DEBUFF_ADDED]|r slot=%d %s stacks=%d guid=%s", 
-          slot, spellName, stacks, DebugGuid(guid)))
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[DEBUFF_ADDED]|r slot=%d %s stacks=%d guid=%s", 
+          GetDebugTimestamp(), slot, spellName, stacks, DebugGuid(guid)))
       end
       
       -- Skip if unit is dead
@@ -1368,8 +1373,8 @@ if hasNampower then
           if age > 1 then
             ownDebuffs[guid][spellName] = nil
           elseif debugStats.enabled and IsCurrentTarget(guid) then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[RENEWAL SKIP DELETE]|r %s age=%.2fs - kept in ownDebuffs", 
-              spellName, age))
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00ff[RENEWAL SKIP DELETE]|r %s age=%.2fs - kept in ownDebuffs", 
+              GetDebugTimestamp(), spellName, age))
           end
         end
       end
@@ -1380,8 +1385,8 @@ if hasNampower then
         local removedCasterGuid = slotData.casterGuid
         
         if debugStats.enabled and IsCurrentTarget(guid) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[DEBUFF_REMOVED]|r slot=%d %s caster=%s", 
-            slot, spellName, DebugGuid(removedCasterGuid)))
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[DEBUFF_REMOVED]|r slot=%d %s caster=%s", 
+            GetDebugTimestamp(), slot, spellName, DebugGuid(removedCasterGuid)))
         end
         
         -- Also remove from allAuraCasts

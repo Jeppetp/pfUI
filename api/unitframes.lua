@@ -1614,12 +1614,7 @@ function pfUI.uf:RefreshUnit(unit, component)
         stacks = GetPlayerBuffApplications(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
         dtype = GetPlayerBuffDispelType(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
       elseif selfdebuff == "1" then
-        -- Call ONCE and reuse the result (prevents race condition)
-        local name, rank, duration, timeleft, caster
-        name, rank, texture, stacks, dtype, duration, timeleft, caster = libdebuff:UnitOwnDebuff(unitstr, i)
-        -- Store for timer usage below
-        unit.debuffs[i]._duration = duration
-        unit.debuffs[i]._timeleft = timeleft
+        _, _, texture, stacks, dtype = libdebuff:UnitOwnDebuff(unitstr, i)
       else
         texture, stacks, dtype = UnitDebuff(unitstr, i)
       end
@@ -1639,9 +1634,7 @@ function pfUI.uf:RefreshUnit(unit, component)
           local timeleft = GetPlayerBuffTimeLeft(GetPlayerBuff(PLAYER_BUFF_START_ID+unit.debuffs[i].id, "HARMFUL"),"HARMFUL")
           CooldownFrame_SetTimer(unit.debuffs[i].cd, GetTime(), timeleft, 1)
         elseif libdebuff and selfdebuff == "1" then
-          -- Reuse stored values (no second call!)
-          local duration = unit.debuffs[i]._duration
-          local timeleft = unit.debuffs[i]._timeleft
+          local name, rank, texture, stacks, dtype, duration, timeleft, caster = libdebuff:UnitOwnDebuff(unitstr, i)
           if duration and timeleft then
             CooldownFrame_SetTimer(unit.debuffs[i].cd, GetTime() + timeleft - duration, duration, 1)
           end
@@ -1837,55 +1830,51 @@ function pfUI.uf:RefreshUnit(unit, component)
     if table.getn(unit.indicator_custom) > 0 then
       scanner = scanner or libtipscan:GetScanner("unitframes")
 
-      for i=1,32 do -- scan for custom buffs (only on friendly targets)
-        if not UnitCanAttack("player", unitstr) then
-          local texture, count = UnitBuff(unitstr, i)
-          if texture then
-            local timeleft, name, _
-            if pfUI.client > 11200 then
-              name, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
-            else
-              scanner:SetUnitBuff(unitstr, i)
-              name = scanner:Line(1) or ""
-            end
+      for i=1,32 do -- scan for custom buffs
+        local texture, count = UnitBuff(unitstr, i)
+        if texture then
+          local timeleft, name, _
+          if pfUI.client > 11200 then
+            name, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
+          else
+            scanner:SetUnitBuff(unitstr, i)
+            name = scanner:Line(1) or ""
+          end
 
-            -- match filter
-            for _, filter in pairs(unit.indicator_custom) do
-              if filter == string.lower(name) then
-                pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
-                pos = pos + 1
-                break
-              end
+          -- match filter
+          for _, filter in pairs(unit.indicator_custom) do
+            if filter == string.lower(name) then
+              pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+              pos = pos + 1
+              break
             end
           end
         end
       end
 
-      for i=1,32 do -- scan for custom debuffs (only on hostile targets)
-        if UnitCanAttack("player", unitstr) then
-          local texture, count = UnitDebuff(unitstr, i)
-          if texture then
-            local timeleft, name, _
-            if libdebuff then
-              -- Use UnitOwnDebuff if "show only own debuffs" is enabled
-              if unit.config.selfdebuff == "1" then
-                name, _, texture, _, _, _, timeleft = libdebuff:UnitOwnDebuff(unitstr, i)
-              else
-                name, _, texture, _, _, _, timeleft = libdebuff:UnitDebuff(unitstr, i)
-              end
+      for i=1,32 do -- scan for custom debuffs
+        local texture, count = UnitDebuff(unitstr, i)
+        if texture then
+          local timeleft, name, _
+          if libdebuff then
+            -- Use UnitOwnDebuff if "show only own debuffs" is enabled
+            if unit.config.selfdebuff == "1" then
+              name, _, texture, _, _, _, timeleft = libdebuff:UnitOwnDebuff(unitstr, i)
             else
-              scanner:SetUnitDebuff(unitstr, i)
-              name = scanner:Line(1) or ""
+              name, _, texture, _, _, _, timeleft = libdebuff:UnitDebuff(unitstr, i)
             end
+          else
+            scanner:SetUnitDebuff(unitstr, i)
+            name = scanner:Line(1) or ""
+          end
 
-            -- match filter (check name exists before string.lower)
-            if name then
-              for _, filter in pairs(unit.indicator_custom) do
-                if filter == string.lower(name) then
-                  pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
-                  pos = pos + 1
-                  break
-                end
+          -- match filter
+          if name then
+            for _, filter in pairs(unit.indicator_custom) do
+              if filter == string.lower(name) then
+                pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                pos = pos + 1
+                break
               end
             end
           end
