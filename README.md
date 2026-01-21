@@ -349,19 +349,6 @@ end
 
 ---
 
-## 🚫 What's NOT in This Build
-
-Features present in Master 6.2.5 but missing here:
-
-- ❌ **Disable Hostile Nameplates In Friendly Zones**
-- ❌ **Disable Friendly Nameplates In Friendly Zones**
-
-**Why:** Experiment branched before these features were added.
-
-**Workaround:** Merge from Master 6.2.5 if needed.
-
----
-
 ## 📋 Installation
 
 ### Requirements
