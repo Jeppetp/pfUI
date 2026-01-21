@@ -96,7 +96,7 @@ The system now tracks combo points and calculates actual finisher durations:
 - Formula: `2s + ComboPoints × 1s`
 - Durations: 3s / 4s / 5s / 6s / 7s (1-5 CP)
 
-**Before:** All Rips showed 18s (wrong for 1-4 CP)
+**Before:** All Rips showed 16s (wrong for 1-4 CP)
 **After:** Shows actual duration based on combo points used
 
 ---
@@ -225,6 +225,49 @@ uniqueDebuffs = {
 
 ---
 
+### 🗺️ Friendly Zone Nameplate Control
+
+**Two Independent Toggles:**
+
+Settings → Nameplates now has two new checkboxes:
+
+1. **"Disable Hostile Nameplates In Friendly Zones"**
+   - Hides enemy/hostile nameplates when in friendly zones
+   - Auto-restores when entering contested/hostile zones
+
+2. **"Disable Friendly Nameplates In Friendly Zones"**
+   - Hides friendly nameplates when in friendly zones
+   - Auto-restores when entering contested/hostile zones
+
+**How It Works:**
+- Uses `GetZonePVPInfo()` API to detect zone type
+- "friendly" zones = Your faction's territory:
+  - Alliance: Stormwind, Ironforge, Darnassus + all Alliance zones
+  - Horde: Orgrimmar, Thunder Bluff, Undercity + all Horde zones
+- "contested" / "hostile" / "sanctuary" zones = Nameplates restored
+
+**Smart Behavior:**
+- Toggle works immediately even if already in friendly zone
+- Saves your current nameplate settings when entering friendly zone
+- Restores exact previous settings when leaving friendly zone
+- Independent control (you can disable hostile only, friendly only, or both)
+
+**Use Cases:**
+- **Clean cities:** Hide all nameplates in safe zones
+- **PvE grouping:** Hide hostile, keep friendly visible for party invites
+- **Leveling zones:** Hide friendly NPCs, see only enemies while questing
+
+**Example:**
+```
+Standing in Stormwind (friendly zone):
+- Enable "Disable Hostile Nameplates" → Hostile nameplates disappear
+- Walk to Elwynn Forest → Still no hostile (still friendly)
+- Walk to Stranglethorn Vale → Hostile nameplates appear! (contested)
+- Walk back to Westfall → Hostile nameplates disappear (friendly)
+```
+
+---
+
 ### 🔧 Nampower Integration
 
 **Initial Scan with GetUnitField():**
@@ -349,6 +392,18 @@ end
 
 ---
 
+## 🚫 Known Limitations
+
+**Compared to Master 6.2.5:**
+- None! All features from Master 6.2.5 are now included.
+
+**Experimental Status:**
+- Higher code complexity (3x more code in libdebuff)
+- Needs more real-world testing in 40-man raids
+- Some edge cases may still exist
+
+---
+
 ## 📋 Installation
 
 ### Requirements
@@ -386,11 +441,15 @@ Please help test these scenarios and report bugs:
 - [ ] Cast 1 combo point Rip → check duration shows 10s
 - [ ] Ferocious Bite with 5 CP → check Rip/Rake refresh
 - [ ] Cast Faerie Fire → check FF (Feral) removed if active
+- [ ] **Enable "Disable Hostile..." in Stormwind → check hostile nameplates disappear**
+- [ ] **Walk to Stranglethorn → check hostile nameplates reappear**
+- [ ] **Toggle checkbox while in city → check immediate effect**
 
 **Group:**
 - [ ] Multiple druids on same target → each see their own Moonfire
 - [ ] Rank 10 active, cast Rank 1 → check Rank 1 blocked
 - [ ] Rapid target switching → check timers don't flicker
+- [ ] **Friendly nameplate disable in Elwynn → check party members invisible**
 
 **Raid:**
 - [ ] 40-man with 5+ druids → check slot shifting
@@ -427,19 +486,23 @@ Please help test these scenarios and report bugs:
 ✅ Unique debuff system (Hunter's Mark, Scorpid Sting)
 ✅ Nampower GetUnitField() initial scan
 ✅ Combat indicator fix (works on player frame now)
+✅ **Friendly zone nameplate control (2 independent toggles)**
 
 ### Changed
 🔧 libdebuff.lua completely rewritten (464 → 1579 lines)
 🔧 UnitOwnDebuff() uses table lookup instead of tooltip scan
-🔧 Nameplates optimized (-105 lines)
+🔧 Nameplates optimized
 🔧 Combat indicator uses separate 0.2s throttle
 
-### Removed
-❌ Friendly zone nameplate features (not ported from Master 6.2.5)
+### Nothing Removed
+✅ All features from Master 6.2.5 are included!
 
 ---
 
 ## 🎯 Roadmap
+
+**Completed:**
+- [x] ~~Port friendly zone nameplate features from Master~~ **DONE!**
 
 **Planned:**
 - [ ] Add WeakAuras Nampower trigger support
@@ -457,7 +520,9 @@ Please help test these scenarios and report bugs:
 ## 📚 Documentation
 
 **For Developers:**
-- See `/docs/ANALYSIS_COMPARISON.md`
+- See `/docs/libdebuff_architecture.md` (coming soon)
+- Event flow diagram (coming soon)
+- Table structure documentation (coming soon)
 
 **For Users:**
 - FAQ: Why is this experimental?

@@ -320,6 +320,20 @@ end
 
 ---
 
+## 📋 What's NOT in Experiment (vs Master 6.2.5)
+
+**UPDATE: As of NEW Experiment build, ALL features from Master 6.2.5 are now included!**
+
+✅ **Friendly Zone Nameplate Disable** - NOW INCLUDED in NEW Experiment build
+- Feature: "Disable Hostile Nameplates In Friendly Zones" ✅
+- Feature: "Disable Friendly Nameplates In Friendly Zones" ✅
+
+**Previous Status:** Experiment branched before this feature was added.
+
+**Current Status:** Feature has been successfully ported and is fully functional in the NEW build.
+
+---
+
 ## 🏆 Final Verdict
 
 ### Performance Ranking
@@ -335,8 +349,8 @@ end
 
 ### Feature Ranking
 
-1. **Experiment 7.0.0:** ⭐⭐⭐⭐⭐ (Combo points, multi-caster, rank protection)
-2. **Master 6.2.5:** ⭐⭐⭐ (Friendly zone nameplates, but lacking advanced tracking)
+1. **Experiment 7.0.0 (NEW):** ⭐⭐⭐⭐⭐ (Combo points, multi-caster, rank protection, friendly zone control)
+2. **Master 6.2.5:** ⭐⭐⭐⭐ (Friendly zone nameplates, but lacking advanced tracking)
 
 ---
 
@@ -362,7 +376,7 @@ end
 1. **Untested in large raids (40-man)** - Slot shifting with 16 debuffs from 5+ druids
 2. **Carnage talent detection** - Requires extensive testing with different CP counts
 3. **Race conditions** - DEBUFF_ADDED sometimes fires before AURA_CAST_ON_SELF processes
-4. **Missing Master 6.2.5 features** - Friendly zone nameplates not ported
+4. ~~**Missing Master 6.2.5 features** - Friendly zone nameplates not ported~~ **FIXED in NEW build!**
 
 ---
 
