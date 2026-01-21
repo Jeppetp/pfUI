@@ -24,7 +24,6 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 - ❌ Not fully tested in 40-man raids
 - ❌ Higher code complexity = more potential bugs
 - ❌ Some edge cases with combo point tracking unverified
-- ❌ Missing friendly zone nameplate features from Master 6.2.5
 
 **Use This Build If:**
 - ✅ You have SuperWoW + Nampower installed
