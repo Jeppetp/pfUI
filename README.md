@@ -442,7 +442,6 @@ Please help test these scenarios and report bugs:
 ## 🎯 Roadmap
 
 **Planned:**
-- [ ] Port friendly zone nameplate features from Master
 - [ ] Add WeakAuras Nampower trigger support
 - [ ] Improve combo point detection reliability
 - [ ] Add detailed debug logging system
