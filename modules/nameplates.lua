@@ -37,6 +37,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   }
 
   local offtanks = {}
+  local threatMemory = {}   -- guid -> true if mob had player targeted (persists through casts)
 
   local combatstate = {
     -- gets overwritten by user config
@@ -76,9 +77,20 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     local color = false
 
     if UnitAffectingCombat("player") and UnitAffectingCombat(guid) and not UnitCanAssist("player", guid) then
+      -- Check if mob is currently casting (uses existing CastEvents cache)
+      local isCasting = CastEvents[guid] and CastEvents[guid].endTime and GetTime() < CastEvents[guid].endTime
+      local targetingPlayer = UnitIsUnit(target, "player")
+
+      -- Remember if mob targets player, clear only when targeting someone else while NOT casting
+      if targetingPlayer then
+        threatMemory[guid] = true
+      elseif UnitExists(target) and not isCasting then
+        threatMemory[guid] = nil
+      end
+
       if C.nameplates.ccombatcasting == "1" and (UnitCastingInfo(guid) or UnitChannelInfo(guid)) then
         color = combatstate.CASTING
-      elseif C.nameplates.ccombatthreat == "1" and UnitIsUnit(target, "player") then
+      elseif C.nameplates.ccombatthreat == "1" and (targetingPlayer or threatMemory[guid]) then
         color = combatstate.THREAT
       elseif C.nameplates.ccombatofftank == "1" and UnitName(target) and offtanks[strlower(UnitName(target))] then
         color = combatstate.OFFTANK
@@ -457,6 +469,10 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     elseif event == "PLAYER_LEAVE_COMBAT" then
       this.inCombat = nil
       if PlayerFrame then PlayerFrame.inCombat = nil end
+      -- Clear threat memory when leaving combat
+      for k in pairs(threatMemory) do
+        threatMemory[k] = nil
+      end
     end
   end)
 
