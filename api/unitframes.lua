@@ -1319,7 +1319,7 @@ function pfUI.uf.OnUpdate()
     end
 
     if this.update_pvp then
-      pfUI.uf:RefreshIndicators(this)
+      pfUI.uf:RefreshUnit(this, "pvp")
       this.update_pvp = nil
     end
 
