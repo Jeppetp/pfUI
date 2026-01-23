@@ -1200,6 +1200,66 @@ function pfUI.uf.OnUpdate()
         pfUI.uf:RefreshUnit(this, "all")
       end
     end
+    
+    -- Heal Prediction (throttled to 0.1s for responsiveness)
+    if libpredict and this.incHeal then
+      if not this.lastHealTick then this.lastHealTick = now end
+      if this.lastHealTick < now then
+        this.lastHealTick = now + 0.1
+        
+        local unit = this.label .. this.id
+        local heal = libpredict:UnitGetIncomingHeals(unit)
+        local health, maxHealth = UnitHealth(unit), UnitHealthMax(unit)
+
+        if heal - health - maxHealth ~= this.predictstate then
+          local overhealperc = tonumber(this.config.overhealperc)
+          this.predictstate = heal - health - maxHealth
+
+          if heal > 0 and (health < maxHealth or overhealperc > 0 ) then
+            local width = this.config.width
+            local height = this.config.height
+
+            if this.config.verticalbar == "0" then
+              local healthWidth = width * (health / maxHealth)
+              local incWidth = width * heal / maxHealth
+              if healthWidth + incWidth > width * (1+(overhealperc/100)) then
+                incWidth = width * (1+overhealperc/100) - healthWidth
+              end
+
+              if this.config.invert_healthbar == "1" then
+                this.incHeal:SetWidth(incWidth)
+              else
+                this.incHeal:SetWidth(incWidth + healthWidth)
+              end
+            else
+              local healthHeight = height * (health / maxHealth)
+              local incHeight = height * heal / maxHealth
+              if healthHeight + incHeight > height * (1+(overhealperc/100)) then
+                incHeight = height * (1+overhealperc/100) - healthHeight
+              end
+
+              if this.config.invert_healthbar == "1" then
+                this.incHeal:SetHeight(incHeight)
+              else
+                this.incHeal:SetHeight(incHeight + healthHeight)
+              end
+            end
+
+            this.incHeal:Show()
+          else
+            this.incHeal:Hide()
+          end
+        end
+        
+        -- update ressurections
+        local ress = libpredict:UnitHasIncomingResurrection(unit)
+        if ress and UnitIsDeadOrGhost(unit) then
+          this.ressIcon:Show()
+        else
+          this.ressIcon:Hide()
+        end
+      end
+    end
   end
 
   -- ============================================================================
@@ -1382,61 +1442,6 @@ function pfUI.uf.OnUpdate()
     this.portrait.model:SetUnit(this.portrait.model.update)
     this.portrait.model:SetCamera(0)
     this.portrait.model.update = nil
-  end
-
-  -- get incoming heals and resurections
-  if libpredict then
-    local unit = this.label .. this.id
-    local heal = libpredict:UnitGetIncomingHeals(unit)
-    local ress = libpredict:UnitHasIncomingResurrection(unit)
-    local health, maxHealth = UnitHealth(unit), UnitHealthMax(unit)
-
-    if heal - health - maxHealth ~= this.predictstate then
-      local overhealperc = tonumber(this.config.overhealperc)
-      this.predictstate = heal - health - maxHealth
-
-      if heal > 0 and (health < maxHealth or overhealperc > 0 ) then
-        local width = this.config.width
-        local height = this.config.height
-
-        if this.config.verticalbar == "0" then
-          local healthWidth = width * (health / maxHealth)
-          local incWidth = width * heal / maxHealth
-          if healthWidth + incWidth > width * (1+(overhealperc/100)) then
-            incWidth = width * (1+overhealperc/100) - healthWidth
-          end
-
-          if this.config.invert_healthbar == "1" then
-            this.incHeal:SetWidth(incWidth)
-          else
-            this.incHeal:SetWidth(incWidth + healthWidth)
-          end
-        else
-          local healthHeight = height * (health / maxHealth)
-          local incHeight = height * heal / maxHealth
-          if healthHeight + incHeight > height * (1+(overhealperc/100)) then
-            incHeight = height * (1+overhealperc/100) - healthHeight
-          end
-
-          if this.config.invert_healthbar == "1" then
-            this.incHeal:SetHeight(incHeight)
-          else
-            this.incHeal:SetHeight(incHeight + healthHeight)
-          end
-        end
-
-        this.incHeal:Show()
-      else
-        this.incHeal:Hide()
-      end
-    end
-
-    -- update ressurections
-    if ress and UnitIsDeadOrGhost(unit) then
-      this.ressIcon:Show()
-    else
-      this.ressIcon:Hide()
-    end
   end
 end
 
