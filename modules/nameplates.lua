@@ -1193,37 +1193,39 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     local nameplate = frame.nameplate
     local now = state and state.now or GetTime()
     
-    -- Update GUID registry on every update (GUID can change)
+    -- Update GUID registry (lightweight, needed for event routing)
     if superwow_active then
       local guid = frame:GetName(1)
       if guid and guid ~= nameplate.cachedGuid then
-        -- Remove old GUID from registry
         if nameplate.cachedGuid and guidRegistry[nameplate.cachedGuid] == frame then
           guidRegistry[nameplate.cachedGuid] = nil
         end
-        -- Register new GUID
         nameplate.cachedGuid = guid
         guidRegistry[guid] = frame
       end
     end
     
-    -- Intelligent throttling based on target/castbar status
+    -- Intelligent throttling based on target/castbar status (same as original)
     local target = state and state.hasTarget and frame:GetAlpha() >= 0.99 or nil
     local isCasting = nameplate.castbar and nameplate.castbar:IsShown()
-    
-    -- Check for pending event updates (these bypass throttle)
-    local hasEventUpdate = nameplate.eventcache or nameplate.auraUpdate or nameplate.castUpdate or nameplate.targetUpdate or nameplate.comboUpdate
     
     local throttle
     if target or isCasting then
       throttle = 0.02  -- 50 FPS for target OR active castbar
     else
-      throttle = 0.1   -- 10 FPS for others (healthbar updates)
+      throttle = 0.1   -- 10 FPS for others
     end
     
-    -- Event updates bypass throttle for immediate response
+    -- Check for pending event updates (these bypass throttle for immediate response)
+    local hasEventUpdate = nameplate.eventcache or nameplate.auraUpdate or nameplate.castUpdate or nameplate.targetUpdate or nameplate.comboUpdate
+    
+    -- Event updates bypass throttle
     if not hasEventUpdate and (nameplate.lasttick or 0) + throttle > now then return end
     nameplate.lasttick = now
+    
+    -- =========================================================================
+    -- EVERYTHING BELOW RUNS AT THROTTLED RATE (50 FPS target, 10 FPS others)
+    -- =========================================================================
     
     local update
     local original = nameplate.original
@@ -1240,7 +1242,44 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       nameplate.comboUpdate = nil
     end
 
-    -- OPTIMIZED: Cache strata changes
+    -- =========================================================================
+    -- VANILLA OVERLAP/CLICKTHROUGH HANDLING
+    -- =========================================================================
+    if pfUI.client <= 11200 then
+      local useOverlap = C.nameplates["overlap"] == "1" or C.nameplates["vertical_offset"] ~= "0"
+      local clickable = C.nameplates["clickthrough"] ~= "1"
+
+      if not clickable then
+        frame:EnableMouse(false)
+        nameplate:EnableMouse(false)
+      else
+        local plate = useOverlap and nameplate or frame
+        plate:EnableMouse(clickable)
+      end
+
+      if C.nameplates["overlap"] == "1" then
+        if frame:GetWidth() > 1 then
+          frame:SetWidth(1)
+          frame:SetHeight(1)
+        end
+      else
+        if not nameplate.dwidth then
+          nameplate.dwidth = floor(nameplate:GetWidth() * UIParent:GetScale())
+        end
+
+        if floor(frame:GetWidth()) ~= nameplate.dwidth then
+          frame:SetWidth(nameplate:GetWidth() * UIParent:GetScale())
+          frame:SetHeight(nameplate:GetHeight() * UIParent:GetScale())
+        end
+      end
+
+      local mouseEnabled = nameplate:IsMouseEnabled()
+      if C.nameplates["clickthrough"] == "0" and C.nameplates["overlap"] == "1" and SpellIsTargeting() == mouseEnabled then
+        nameplate:EnableMouse(not mouseEnabled)
+      end
+    end
+
+    -- Cache strata changes
     if nameplate.istarget ~= target then
       nameplate.target_strata = nil
     end
@@ -1255,13 +1294,11 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
 
     nameplate.istarget = target
 
-    -- set non-target plate alpha (use cached config)
+    -- Set non-target plate alpha
     local configAlpha = cfg.notargalpha or 0.5
-
     local desiredAlpha = (target or not state.hasTarget) and 1 or configAlpha
 
     if nameplate.cachedAlpha ~= desiredAlpha then
-      -- Setze nur die nameplate Alpha, nicht den parent frame
       nameplate:SetAlpha(desiredAlpha)
       nameplate.cachedAlpha = desiredAlpha
     end
@@ -1284,13 +1321,22 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       update = true
     end
 
-    -- trigger update when name color changed
+    -- trigger update when name color changed (includes combat state check)
     local r, g, b = original.name:GetTextColor()
-    if r + g + b ~= nameplate.cache.namecolor then
+    local inCombatWithPlayer = false
+    if superwow_active and cfg.namefightcolor then
+      local guid = nameplate.cachedGuid
+      if guid then
+        inCombatWithPlayer = UnitAffectingCombat(guid) and UnitAffectingCombat("player")
+      end
+    end
+    
+    if r + g + b ~= nameplate.cache.namecolor or (cfg.namefightcolor and nameplate.cache.inCombat ~= inCombatWithPlayer) then
       nameplate.cache.namecolor = r + g + b
+      nameplate.cache.inCombat = inCombatWithPlayer
 
       if cfg.namefightcolor then
-        if r > .9 and g < .2 and b < .2 then
+        if (r > .9 and g < .2 and b < .2) or inCombatWithPlayer then
           nameplate.name:SetTextColor(1,0.4,0.2,1)
         else
           nameplate.name:SetTextColor(r,g,b,1)
@@ -1331,7 +1377,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       nameplate.tick = now + .5
     end
 
-    -- OPTIMIZED: Cache zoom dimensions
+    -- Zoom animation
     if target and cfg.targetzoom then
       if not nameplate.health.zoomed then
         local zoomval = cfg.zoomval
@@ -1344,27 +1390,27 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       local w, h = nameplate.health:GetWidth(), nameplate.health:GetHeight()
       local wc, hc = nameplate.health.targetWidth, nameplate.health.targetHeight
       
-      -- Nutze kleine Toleranz um Fließkomma-Schwankungen zu vermeiden
-      if wc > w + 0.5 then
-        nameplate.health:SetWidth(w*1.05)
-        nameplate.health.zoomTransition = true
-      elseif hc > h + 0.5 then
-        nameplate.health:SetHeight(h*1.05)
-        nameplate.health.zoomTransition = true
-      else
-        if nameplate.health.zoomTransition then
-          nameplate.health:SetWidth(wc)
-          nameplate.health:SetHeight(hc)
-          nameplate.health.zoomTransition = nil
+      if wc and hc then
+        if wc > w + 0.5 then
+          nameplate.health:SetWidth(w*1.05)
+          nameplate.health.zoomTransition = true
+        elseif hc > h + 0.5 then
+          nameplate.health:SetHeight(h*1.05)
+          nameplate.health.zoomTransition = true
+        else
+          if nameplate.health.zoomTransition then
+            nameplate.health:SetWidth(wc)
+            nameplate.health:SetHeight(hc)
+            nameplate.health.zoomTransition = nil
+          end
+          nameplate.health.zoomed = true
         end
-        nameplate.health.zoomed = true
       end
     elseif nameplate.health.zoomed or nameplate.health.zoomTransition then
       local w, h = nameplate.health:GetWidth(), nameplate.health:GetHeight()
       local wc = cfg.width
       local hc = cfg.heighthealth
 
-      -- Nutze kleine Toleranz um Fließkomma-Schwankungen zu vermeiden
       if w > wc + 0.5 then
         nameplate.health:SetWidth(w*.95)
       elseif h > hc + 0.5 then
@@ -1377,6 +1423,48 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
         nameplate.health.targetWidth = nil
         nameplate.health.targetHeight = nil
       end
+    end
+
+    -- queue update on visual mouseover update
+    if nameplate.cache.mouseover ~= mouseover then
+      nameplate.cache.mouseover = mouseover
+      update = true
+    end
+
+    -- trigger update when unit was found
+    if nameplate.wait_for_scan and GetUnitData(name, true) then
+      nameplate.wait_for_scan = nil
+      update = true
+    end
+
+    -- trigger update when level color changed
+    local r, g, b = original.level:GetTextColor()
+    r, g, b = r + .3, g + .3, b + .3
+    if r + g + b ~= nameplate.cache.levelcolor then
+      nameplate.cache.levelcolor = r + g + b
+      nameplate.level:SetTextColor(r,g,b,1)
+      update = true
+    end
+
+    -- scan for debuff timeouts
+    if nameplate.debuffcache then
+      for id, data in pairs(nameplate.debuffcache) do
+        if ( not data.stop or data.stop < now ) and not data.empty then
+          data.empty = true
+          update = true
+        end
+      end
+    end
+
+    -- use timer based updates
+    if not nameplate.tick or nameplate.tick < now then
+      update = true
+    end
+
+    -- run full updates if required
+    if update then
+      nameplates:OnDataChanged(nameplate)
+      nameplate.tick = now + .5
     end
 
     -- OPTIMIZED: UNIT_CASTEVENT implementation
@@ -1502,6 +1590,9 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   nameplates:SetGameVariables()
 
   nameplates.UpdateConfig = function()
+    -- Refresh config cache for all cfg.* values
+    CacheConfig()
+    
     -- update debuff filters
     DebuffFilterPopulate()
 
@@ -1609,51 +1700,6 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       if (C.nameplates["overlap"] == "1" or C.nameplates["vertical_offset"] ~= "0") then
         nameplate.parent:EnableMouse(false)
       end
-    end
-
-    local hookOnUpdate = nameplates.OnUpdate
-    nameplates.OnUpdate = function(self)
-      -- Skip if nameplate not yet initialized
-      if not this.nameplate then return end
-      
-      -- initialize shortcut variables
-      local plate = (C.nameplates["overlap"] == "1" or C.nameplates["vertical_offset"] ~= "0") and this.nameplate or this
-      local clickable = C.nameplates["clickthrough"] ~= "1" and true or false
-
-      -- disable all click events
-      if not clickable then
-        this:EnableMouse(false)
-        this.nameplate:EnableMouse(false)
-      else
-        plate:EnableMouse(clickable)
-      end
-
-      if C.nameplates["overlap"] == "1" then
-        if this:GetWidth() > 1 then
-          -- set parent to 1 pixel to have them overlap each other
-          this:SetWidth(1)
-          this:SetHeight(1)
-        end
-      else
-        if not this.nameplate.dwidth then
-          -- cache initial sizing value for comparison
-          this.nameplate.dwidth = floor(this.nameplate:GetWidth() * UIParent:GetScale())
-        end
-
-        if floor(this:GetWidth()) ~= this.nameplate.dwidth then
-          -- align parent plate to the actual size
-          this:SetWidth(this.nameplate:GetWidth() * UIParent:GetScale())
-          this:SetHeight(this.nameplate:GetHeight() * UIParent:GetScale())
-        end
-      end
-
-      -- disable click events while spell is targeting
-      local mouseEnabled = this.nameplate:IsMouseEnabled()
-      if C.nameplates["clickthrough"] == "0" and C.nameplates["overlap"] == "1" and SpellIsTargeting() == mouseEnabled then
-        this.nameplate:EnableMouse(not mouseEnabled)
-      end
-
-      hookOnUpdate(self)
     end
 
     -- enable mouselook on rightbutton down
