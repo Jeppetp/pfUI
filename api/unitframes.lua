@@ -1713,8 +1713,7 @@ function pfUI.uf:RefreshUnitState(unit)
 end
 
 function pfUI.uf:RefreshIndicators(unit)
-  if not unit.label then return end
-  if not unit.id then unit.id = "" end
+  if not unit.label or not unit.id then return end
   local unitstr = unit.label .. unit.id
 
   if unit.leaderIcon then -- Leader Icon
