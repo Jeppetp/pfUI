@@ -1154,10 +1154,20 @@ function pfUI.uf.OnUpdate()
     end
 
     -- Range Check / Online-Offline State (throttled)
-    if not this.lastTick then this.lastTick = now + (this.tick or .2) end
+    -- Validate tick value - it should be an interval (e.g. 0.5), not a timestamp
+    local tickInterval = this.tick
+    if tickInterval and tickInterval > 10 then
+      -- tick is a timestamp, not an interval - ignore it
+      tickInterval = nil
+    end
+    -- Reset lastTick if it's invalid (much larger than now, e.g. from corrupted state)
+    if this.lastTick and this.lastTick > now + 10 then
+      this.lastTick = nil
+    end
+    if not this.lastTick then this.lastTick = now + (tickInterval or .5) end
     if this.lastTick < now then
       local unitstr = this.label .. this.id
-      this.lastTick = now + (this.tick or .2)
+      this.lastTick = now + (tickInterval or .5)
 
       -- target target has a huge delay, make sure to not tick during range checks
       if this.label == "targettarget" or this.label == "targettargettarget" then
@@ -1309,9 +1319,8 @@ function pfUI.uf.OnUpdate()
     end
 
     if this.update_pvp then
-      pfUI.uf:RefreshUnit(this, "pvp")
+      pfUI.uf:RefreshIndicators(this)
       this.update_pvp = nil
-      this.update_base = true
     end
 
     if this.update_base then
@@ -1704,7 +1713,8 @@ function pfUI.uf:RefreshUnitState(unit)
 end
 
 function pfUI.uf:RefreshIndicators(unit)
-  if not unit.label or not unit.id then return end
+  if not unit.label then return end
+  if not unit.id then unit.id = "" end
   local unitstr = unit.label .. unit.id
 
   if unit.leaderIcon then -- Leader Icon
