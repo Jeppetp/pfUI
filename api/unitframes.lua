@@ -1002,6 +1002,16 @@ local _GetTime = GetTime
 pfUI.uf.now = 0
 
 -- ============================================================================
+-- GLOBAL FALLBACK THROTTLE - Limits total fallback updates across ALL frames
+-- ============================================================================
+pfUI.uf.fallbackThrottle = {
+  lastUpdate = 0,
+  interval = 0.1,  -- 10 updates per second total (not per frame!)
+  updatesThisInterval = 0,
+  maxUpdatesPerInterval = 5  -- Max 5 frames can update per interval
+}
+
+-- ============================================================================
 -- STATS SYSTEM - Performance tracking for Nampower vs Fallback
 -- ============================================================================
 pfUI.uf.stats = {
@@ -1227,14 +1237,24 @@ function pfUI.uf.OnUpdate()
       end
       
       if needsFallback then
-        -- Throttle fallback updates to 0.1s (same as raid/party throttle)
-        if (this.fallbackTick or 0) > now then
+        -- GLOBAL Throttle: Limit fallback updates across ALL frames
+        local throttle = pfUI.uf.fallbackThrottle
+        
+        -- Reset counter each interval
+        if now - throttle.lastUpdate > throttle.interval then
+          throttle.lastUpdate = now
+          throttle.updatesThisInterval = 0
+        end
+        
+        -- Check if we've exceeded max updates this interval
+        if throttle.updatesThisInterval >= throttle.maxUpdatesPerInterval then
           if pfUI.uf.stats and pfUI.uf.stats.enabled then
             pfUI.uf.stats.earlyReturns = pfUI.uf.stats.earlyReturns + 1
           end
           return
         end
-        this.fallbackTick = now + 0.1
+        
+        throttle.updatesThisInterval = throttle.updatesThisInterval + 1
         
         -- Nampower not available or no data - trigger fallback update
         this.update_base = true
