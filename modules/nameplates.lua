@@ -613,10 +613,28 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       if plate:IsVisible() then
         nameplates.OnUpdate(plate, frameState)
       else
-        -- Clean up GUID registry for hidden plates
+        -- Clean up ALL caches for hidden plates to prevent memory leak
         local guid = plate.nameplate and plate.nameplate.cachedGuid
-        if guid and guidRegistry[guid] == plate then
-          guidRegistry[guid] = nil
+        if guid then
+          -- Remove from guidRegistry
+          if guidRegistry[guid] == plate then
+            guidRegistry[guid] = nil
+          end
+          
+          -- Clean CastEvents cache
+          if CastEvents[guid] then
+            CastEvents[guid] = nil
+          end
+          
+          -- Clean debuffCache
+          if debuffCache[guid] then
+            debuffCache[guid] = nil
+          end
+          
+          -- Clean threatMemory
+          if threatMemory[guid] then
+            threatMemory[guid] = nil
+          end
         end
       end
     end
@@ -1205,7 +1223,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       end
     end
     
-    -- Intelligent throttling based on target/castbar status (same as original)
+    -- Intelligent throttling based on target/castbar status
     local target = state and state.hasTarget and frame:GetAlpha() >= 0.99 or nil
     local isCasting = nameplate.castbar and nameplate.castbar:IsShown()
     
@@ -1213,7 +1231,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     if target or isCasting then
       throttle = 0.02  -- 50 FPS for target OR active castbar
     else
-      throttle = 0.1   -- 10 FPS for others
+      throttle = 0.1   -- 10 FPS for others (healthbar updates)
     end
     
     -- Check for pending event updates (these bypass throttle for immediate response)

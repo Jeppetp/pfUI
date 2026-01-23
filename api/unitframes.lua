@@ -170,7 +170,11 @@ end)
 -- IMPORTANT: Uses _G.UnitExists directly to avoid conflicts with Nampower's
 --            extended UnitExists that returns (exists, guid)
 -- ============================================================================
-function pfUI.api.GetUnitStats(unitstr)
+
+-- Cache für Stats-Tracking (nur Änderungen zählen)
+pfUI.api.lastUnitStats = pfUI.api.lastUnitStats or {}
+
+function pfUI.api.GetUnitStats(unitstr, trackStats)
   local hp, maxHp, power, maxPower, powerType
   local usedNampower = false
   
@@ -213,10 +217,22 @@ function pfUI.api.GetUnitStats(unitstr)
         -- Check if Nampower gave valid health data
         if hp and hp > 0 and maxHp and maxHp > 0 then
           usedNampower = true
-          -- Track Nampower success
-          if pfUI.uf and pfUI.uf.stats and pfUI.uf.stats.enabled then
-            pfUI.uf.stats.nampowerUsed = (pfUI.uf.stats.nampowerUsed or 0) + 1
+          
+          -- Track Nampower success - NUR bei echten Änderungen
+          if trackStats and pfUI.uf and pfUI.uf.stats and pfUI.uf.stats.enabled then
+            local lastStats = pfUI.api.lastUnitStats[unitstr]
+            if not lastStats or lastStats.hp ~= hp or lastStats.maxHp ~= maxHp or 
+               lastStats.power ~= power or lastStats.maxPower ~= maxPower then
+              pfUI.uf.stats.nampowerUsed = (pfUI.uf.stats.nampowerUsed or 0) + 1
+              pfUI.api.lastUnitStats[unitstr] = {
+                hp = hp,
+                maxHp = maxHp,
+                power = power,
+                maxPower = maxPower
+              }
+            end
           end
+          
           return hp, maxHp, power or 0, maxPower or 1, powerType
         end
       end
@@ -230,10 +246,20 @@ function pfUI.api.GetUnitStats(unitstr)
   power = UnitMana(unitstr) or 0
   maxPower = UnitManaMax(unitstr) or 1
   
-  -- Track Fallback usage
-  if not usedNampower then
+  -- Track Fallback usage - NUR bei echten Änderungen
+  if trackStats and not usedNampower then
     if pfUI.uf and pfUI.uf.stats and pfUI.uf.stats.enabled then
-      pfUI.uf.stats.fallbackUsed = (pfUI.uf.stats.fallbackUsed or 0) + 1
+      local lastStats = pfUI.api.lastUnitStats[unitstr]
+      if not lastStats or lastStats.hp ~= hp or lastStats.maxHp ~= maxHp or 
+         lastStats.power ~= power or lastStats.maxPower ~= maxPower then
+        pfUI.uf.stats.fallbackUsed = (pfUI.uf.stats.fallbackUsed or 0) + 1
+        pfUI.api.lastUnitStats[unitstr] = {
+          hp = hp,
+          maxHp = maxHp,
+          power = power,
+          maxPower = maxPower
+        }
+      end
     end
   end
   
@@ -1027,8 +1053,8 @@ pfUI.uf.stats = {
 
 -- Stats Frame (Live Display)
 pfUI.uf.statsFrame = CreateFrame("Frame", "pfUIStatsFrame", UIParent)
-pfUI.uf.statsFrame:SetWidth(180)
-pfUI.uf.statsFrame:SetHeight(165)
+pfUI.uf.statsFrame:SetWidth(200)
+pfUI.uf.statsFrame:SetHeight(220)
 pfUI.uf.statsFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -10, -200)
 pfUI.uf.statsFrame:SetBackdrop({
   bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
@@ -1053,8 +1079,8 @@ pfUI.uf.statsFrame.title:SetText("Performance")
 -- Stats Text (multi-line)
 pfUI.uf.statsFrame.text = pfUI.uf.statsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 pfUI.uf.statsFrame.text:SetPoint("TOPLEFT", pfUI.uf.statsFrame, "TOPLEFT", 10, -30)
-pfUI.uf.statsFrame.text:SetWidth(160)
-pfUI.uf.statsFrame.text:SetHeight(115)
+pfUI.uf.statsFrame.text:SetWidth(180)
+pfUI.uf.statsFrame.text:SetHeight(180)
 pfUI.uf.statsFrame.text:SetJustifyH("LEFT")
 pfUI.uf.statsFrame.text:SetJustifyV("TOP")
 pfUI.uf.statsFrame.text:SetText("Initializing...")
@@ -1066,29 +1092,35 @@ pfUI.uf.UpdateStatsDisplay = function()
   
   local eventRate = pfUI.uf.stats.eventUpdates / elapsed
   local heartbeatRate = pfUI.uf.stats.heartbeatUpdates / elapsed
-  local totalRate = eventRate + heartbeatRate
+  local totalFrameUpdates = eventRate + heartbeatRate
   
-  -- Calculate Nampower vs Fallback percentages
-  local totalAPICalls = pfUI.uf.stats.nampowerUsed + pfUI.uf.stats.fallbackUsed
-  local nampowerPct = totalAPICalls > 0 and math.floor((pfUI.uf.stats.nampowerUsed / totalAPICalls) * 100) or 0
-  local fallbackPct = totalAPICalls > 0 and math.floor((pfUI.uf.stats.fallbackUsed / totalAPICalls) * 100) or 0
+  -- Calculate Nampower vs Fallback percentages (ONLY counts actual data changes!)
+  local totalDataChanges = pfUI.uf.stats.nampowerUsed + pfUI.uf.stats.fallbackUsed
+  local nampowerPct = totalDataChanges > 0 and math.floor((pfUI.uf.stats.nampowerUsed / totalDataChanges) * 100) or 0
+  local fallbackPct = totalDataChanges > 0 and math.floor((pfUI.uf.stats.fallbackUsed / totalDataChanges) * 100) or 0
+  
+  -- Calculate data change rate (how often HP/Mana actually changes)
+  local dataChangeRate = totalDataChanges / elapsed
   
   local statsText = string.format(
     "Time: %.1fs\n" ..
-    "Event: %.1f/s\n" ..
-    "Heartbeat: %.1f/s\n" ..
+    "|cffaaaaaa--- Frame Updates ---|r\n" ..
+    "Event: %.1f/s (%d)\n" ..
+    "Heartbeat: %.1f/s (%d)\n" ..
     "Total: %.1f/s\n" ..
     "\n" ..
-    "E: %d | H: %d\n" ..
-    "\n" ..
+    "|cffaaaaaa--- Data Changes ---|r\n" ..
+    "Rate: %.1f/s (%d)\n" ..
     "|cff00ff00NP: %d%% (%d)|r\n" ..
     "|cffff8800FB: %d%% (%d)|r",
     elapsed,
     eventRate,
-    heartbeatRate,
-    totalRate,
     pfUI.uf.stats.eventUpdates,
+    heartbeatRate,
     pfUI.uf.stats.heartbeatUpdates,
+    totalFrameUpdates,
+    dataChangeRate,
+    totalDataChanges,
     nampowerPct,
     pfUI.uf.stats.nampowerUsed,
     fallbackPct,
@@ -1100,6 +1132,9 @@ end
 
 -- Stats update timer
 pfUI.uf.statsUpdateTimer = 0
+
+-- Cache cleanup timer (clean lastUnitStats every 30s to prevent memory leak)
+pfUI.uf.cacheCleanupTimer = 0
 
 -- ============================================================================
 -- OnUpdate with Heartbeat Polling and Fallback
@@ -1115,6 +1150,22 @@ function pfUI.uf.OnUpdate()
       if pfUI.uf.stats.startTime > 0 then
         pfUI.uf.UpdateStatsDisplay()
       end
+    end
+  end
+  
+  -- Cleanup lastUnitStats cache every 30 seconds to prevent memory leak
+  if (pfUI.uf.cacheCleanupTimer or 0) <= now then
+    pfUI.uf.cacheCleanupTimer = now + 30
+    
+    -- Only keep cache for units that currently exist
+    if pfUI.api.lastUnitStats then
+      local cleanedCache = {}
+      for unitstr, data in pairs(pfUI.api.lastUnitStats) do
+        if _G.UnitExists(unitstr) then
+          cleanedCache[unitstr] = data
+        end
+      end
+      pfUI.api.lastUnitStats = cleanedCache
     end
   end
   
@@ -1271,7 +1322,7 @@ function pfUI.uf.OnUpdate()
                      this.update_aura or this.update_portrait or 
                      this.update_pvp or this.update_indicators
   
-  -- Track event updates
+  -- Track event-triggered updates (not API calls, just frame updates)
   if hasUpdates and pfUI.uf.stats and pfUI.uf.stats.enabled then
     pfUI.uf.stats.eventUpdates = pfUI.uf.stats.eventUpdates + 1
   end
@@ -2239,7 +2290,7 @@ function pfUI.uf:RefreshUnit(unit, component)
   -- base frame
   if component == "all" or component == "base" then
     -- Unit HP/MP with Nampower Integration
-    local hp, hpmax, power, powermax, powerType = pfUI.api.GetUnitStats(unitstr)
+    local hp, hpmax, power, powermax, powerType = pfUI.api.GetUnitStats(unitstr, true)
 
     if unit.config.invert_healthbar == "1" then
       hp = hpmax - hp
@@ -2805,7 +2856,7 @@ function pfUI.uf:GetStatusValue(unit, pos)
   end
 
   -- Get stats with Nampower Integration
-  local hp, hpmax, mp, mpmax, powerType = pfUI.api.GetUnitStats(unitstr)
+  local hp, hpmax, mp, mpmax, powerType = pfUI.api.GetUnitStats(unitstr, true)
   local rhp, rhpmax = hp, hpmax
 
   -- Use libhealth for mob health estimation (overrides Nampower/Standard)

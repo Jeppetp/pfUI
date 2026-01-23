@@ -383,6 +383,7 @@ local function CleanupOutOfRangeUnits()
       if ownSlots[guid] then ownSlots[guid] = nil end
       if allSlots[guid] then allSlots[guid] = nil end
       if allAuraCasts[guid] then allAuraCasts[guid] = nil end
+      if objectsByGuid[guid] then objectsByGuid[guid] = nil end
     end
   end
 end
