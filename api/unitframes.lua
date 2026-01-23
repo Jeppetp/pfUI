@@ -164,6 +164,82 @@ visibilityscan:SetScript("OnUpdate", function()
   for frame in pairs(this.frames) do frame:UpdateVisibility() end
 end)
 
+-- ============================================================================
+-- GetUnitStats - Nampower Integration for Health + Power
+-- Returns: hp, maxHp, power, maxPower, powerType
+-- IMPORTANT: Uses _G.UnitExists directly to avoid conflicts with Nampower's
+--            extended UnitExists that returns (exists, guid)
+-- ============================================================================
+function pfUI.api.GetUnitStats(unitstr)
+  local hp, maxHp, power, maxPower, powerType
+  local usedNampower = false
+  
+  -- Try Nampower first if available
+  if GetUnitField then
+    -- Use the standard check first, then get guid separately
+    local exists = _G.UnitExists(unitstr)
+    if exists then
+      -- Get guid via the extended UnitExists for Nampower
+      local _, guid = _G.UnitExists(unitstr)
+      if guid then
+        hp = GetUnitField(guid, "health")
+        maxHp = GetUnitField(guid, "maxHealth")
+        
+        -- Get power type from bytes0
+        local bytes0 = GetUnitField(guid, "bytes0")
+        if bytes0 then
+          local temp = math.floor(bytes0 / 16777216)
+          powerType = temp - math.floor(temp / 256) * 256
+        else
+          powerType = UnitPowerType(unitstr) or 0
+        end
+        
+        -- Get power values based on type
+        if powerType == 1 then
+          -- Rage (Nampower stores rage * 10)
+          local rage = GetUnitField(guid, "power2")
+          power = rage and (rage / 10) or UnitMana(unitstr)
+          maxPower = 100
+        elseif powerType == 3 then
+          -- Energy
+          power = GetUnitField(guid, "power4") or UnitMana(unitstr)
+          maxPower = GetUnitField(guid, "maxPower4") or UnitManaMax(unitstr)
+        else
+          -- Mana (default)
+          power = GetUnitField(guid, "power1") or UnitMana(unitstr)
+          maxPower = GetUnitField(guid, "maxPower1") or UnitManaMax(unitstr)
+        end
+        
+        -- Check if Nampower gave valid health data
+        if hp and hp > 0 and maxHp and maxHp > 0 then
+          usedNampower = true
+          -- Track Nampower success
+          if pfUI.uf and pfUI.uf.stats and pfUI.uf.stats.enabled then
+            pfUI.uf.stats.nampowerUsed = (pfUI.uf.stats.nampowerUsed or 0) + 1
+          end
+          return hp, maxHp, power or 0, maxPower or 1, powerType
+        end
+      end
+    end
+  end
+  
+  -- Fallback to standard API
+  hp = UnitHealth(unitstr) or 0
+  maxHp = UnitHealthMax(unitstr) or 1
+  powerType = UnitPowerType(unitstr) or 0
+  power = UnitMana(unitstr) or 0
+  maxPower = UnitManaMax(unitstr) or 1
+  
+  -- Track Fallback usage
+  if not usedNampower then
+    if pfUI.uf and pfUI.uf.stats and pfUI.uf.stats.enabled then
+      pfUI.uf.stats.fallbackUsed = (pfUI.uf.stats.fallbackUsed or 0) + 1
+    end
+  end
+  
+  return hp, maxHp, power, maxPower, powerType
+end
+
 local aggrodata = { }
 function pfUI.api.UnitHasAggro(unit)
   if aggrodata[unit] and GetTime() < aggrodata[unit].check + 1 then
@@ -903,6 +979,8 @@ function pfUI.uf.OnEvent()
     this.update_full = true
   -- UNIT_XXX Events
   elseif arg1 and arg1 == this.label .. this.id then
+    this.lastEventUpdate = GetTime()
+    
     if event == "UNIT_PORTRAIT_UPDATE" or event == "UNIT_MODEL_CHANGED" then
       this.update_portrait = true
     elseif event == "UNIT_AURA" then
@@ -912,7 +990,7 @@ function pfUI.uf.OnEvent()
     elseif event == "UNIT_COMBAT" then
       CombatFeedback_OnCombatEvent(arg2, arg3, arg4, arg5)
     else
-      this.update_full = true
+      this.update_base = true
     end
   end
 end
@@ -923,18 +1001,260 @@ local _GetTime = GetTime
 -- Global cached time for libpredict and other functions
 pfUI.uf.now = 0
 
+-- ============================================================================
+-- STATS SYSTEM - Performance tracking for Nampower vs Fallback
+-- ============================================================================
+pfUI.uf.stats = {
+  eventUpdates = 0,
+  heartbeatUpdates = 0,
+  earlyReturns = 0,
+  nampowerUsed = 0,
+  fallbackUsed = 0,
+  throttledSkips = 0,
+  startTime = 0,
+  enabled = true
+}
+
+-- Stats Frame (Live Display)
+pfUI.uf.statsFrame = CreateFrame("Frame", "pfUIStatsFrame", UIParent)
+pfUI.uf.statsFrame:SetWidth(180)
+pfUI.uf.statsFrame:SetHeight(165)
+pfUI.uf.statsFrame:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -10, -200)
+pfUI.uf.statsFrame:SetBackdrop({
+  bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+  edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+  tile = true, tileSize = 16, edgeSize = 8,
+  insets = { left = 3, right = 3, top = 3, bottom = 3 }
+})
+pfUI.uf.statsFrame:SetBackdropColor(0, 0, 0, 0.8)
+pfUI.uf.statsFrame:EnableMouse(true)
+pfUI.uf.statsFrame:SetMovable(true)
+pfUI.uf.statsFrame:SetClampedToScreen(true)
+pfUI.uf.statsFrame:RegisterForDrag("LeftButton")
+pfUI.uf.statsFrame:SetScript("OnDragStart", function() this:StartMoving() end)
+pfUI.uf.statsFrame:SetScript("OnDragStop", function() this:StopMovingOrSizing() end)
+pfUI.uf.statsFrame:Hide()
+
+-- Stats Title
+pfUI.uf.statsFrame.title = pfUI.uf.statsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+pfUI.uf.statsFrame.title:SetPoint("TOP", pfUI.uf.statsFrame, "TOP", 0, -8)
+pfUI.uf.statsFrame.title:SetText("Performance")
+
+-- Stats Text (multi-line)
+pfUI.uf.statsFrame.text = pfUI.uf.statsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+pfUI.uf.statsFrame.text:SetPoint("TOPLEFT", pfUI.uf.statsFrame, "TOPLEFT", 10, -30)
+pfUI.uf.statsFrame.text:SetWidth(160)
+pfUI.uf.statsFrame.text:SetHeight(115)
+pfUI.uf.statsFrame.text:SetJustifyH("LEFT")
+pfUI.uf.statsFrame.text:SetJustifyV("TOP")
+pfUI.uf.statsFrame.text:SetText("Initializing...")
+
+-- Update function for stats display
+pfUI.uf.UpdateStatsDisplay = function()
+  local elapsed = GetTime() - pfUI.uf.stats.startTime
+  if elapsed < 0.1 then return end
+  
+  local eventRate = pfUI.uf.stats.eventUpdates / elapsed
+  local heartbeatRate = pfUI.uf.stats.heartbeatUpdates / elapsed
+  local totalRate = eventRate + heartbeatRate
+  
+  -- Calculate Nampower vs Fallback percentages
+  local totalAPICalls = pfUI.uf.stats.nampowerUsed + pfUI.uf.stats.fallbackUsed
+  local nampowerPct = totalAPICalls > 0 and math.floor((pfUI.uf.stats.nampowerUsed / totalAPICalls) * 100) or 0
+  local fallbackPct = totalAPICalls > 0 and math.floor((pfUI.uf.stats.fallbackUsed / totalAPICalls) * 100) or 0
+  
+  local statsText = string.format(
+    "Time: %.1fs\n" ..
+    "Event: %.1f/s\n" ..
+    "Heartbeat: %.1f/s\n" ..
+    "Total: %.1f/s\n" ..
+    "\n" ..
+    "E: %d | H: %d\n" ..
+    "\n" ..
+    "|cff00ff00NP: %d%% (%d)|r\n" ..
+    "|cffff8800FB: %d%% (%d)|r",
+    elapsed,
+    eventRate,
+    heartbeatRate,
+    totalRate,
+    pfUI.uf.stats.eventUpdates,
+    pfUI.uf.stats.heartbeatUpdates,
+    nampowerPct,
+    pfUI.uf.stats.nampowerUsed,
+    fallbackPct,
+    pfUI.uf.stats.fallbackUsed
+  )
+  
+  pfUI.uf.statsFrame.text:SetText(statsText)
+end
+
+-- Stats update timer
+pfUI.uf.statsUpdateTimer = 0
+
+-- ============================================================================
+-- OnUpdate with Heartbeat Polling and Fallback
+-- ============================================================================
 function pfUI.uf.OnUpdate()
   local now = _GetTime()
-  pfUI.uf.now = now  -- Cache for libpredict to use
+  pfUI.uf.now = now
+  
+  -- Update stats display (throttled to 0.2s)
+  if pfUI.uf.statsFrame and pfUI.uf.statsFrame:IsShown() then
+    if (pfUI.uf.statsUpdateTimer or 0) <= now then
+      pfUI.uf.statsUpdateTimer = now + 0.2
+      if pfUI.uf.stats.startTime > 0 then
+        pfUI.uf.UpdateStatsDisplay()
+      end
+    end
+  end
   
   -- update combat feedback (no throttle - needs immediate feedback)
   if this.feedbackText then CombatFeedback_OnUpdate(arg1) end
 
   -- Throttle raid/party frames for performance (10 updates/sec)
-  -- Other frames run at full speed for responsive castbars etc.
   if this.label == "raid" or this.label == "party" then
-    if (this.throttleTick or 0) > now then return end
+    if (this.throttleTick or 0) > now then
+      if pfUI.uf.stats and pfUI.uf.stats.enabled then
+        pfUI.uf.stats.throttledSkips = pfUI.uf.stats.throttledSkips + 1
+      end
+      return
+    end
     this.throttleTick = now + 0.1
+  end
+
+  -- ============================================================================
+  -- EVENTLESS ACTIONS (Range Check, Online/Offline, Aggro) - MUST RUN ALWAYS
+  -- These run on their own timer, independent of event-based updates
+  -- ============================================================================
+  if this.label then
+    -- Combat/Aggro Indicators (throttled to 0.2s)
+    if not this.lastCombatCheck then this.lastCombatCheck = now + 0.2 end
+    if this.lastCombatCheck < now then
+      this.lastCombatCheck = now + 0.2
+      
+      if this.config and this.config.squareaggro == "1" and pfUI.api.UnitHasAggro(this.label .. this.id) > 0 then
+        this.combat.tex:SetTexture(1,.2,0)
+        this.combat:Show()
+      elseif this.config and this.config.squarecombat == "1" and UnitAffectingCombat(this.label .. this.id) then
+        this.combat.tex:SetTexture(1,1,.2)
+        this.combat:Show()
+      elseif this.combat then
+        this.combat:Hide()
+      end
+    end
+
+    -- Range Check / Online-Offline State (throttled)
+    if not this.lastTick then this.lastTick = now + (this.tick or .2) end
+    if this.lastTick < now then
+      local unitstr = this.label .. this.id
+      this.lastTick = now + (this.tick or .2)
+
+      -- target target has a huge delay, make sure to not tick during range checks
+      if this.label == "targettarget" or this.label == "targettargettarget" then
+        local name = UnitName(this.label)
+        if name ~= this.namebuf1 then
+          this.namebuf1 = name
+        elseif name ~= this.namebuf2 then
+          this.namebuf2 = name
+        else
+          pfUI.uf:RefreshUnitState(this)
+          pfUI.uf:RefreshIndicators(this)
+        end
+      else
+        pfUI.uf:RefreshUnitState(this)
+        pfUI.uf:RefreshIndicators(this)
+      end
+
+      if this.config and this.config.glowaggro == "1" and pfUI.api.UnitHasAggro(unitstr) > 0 then
+        this.glow:SetBackdropBorderColor(1,.2,0)
+        this.glow:Show()
+      elseif this.config and this.config.glowcombat == "1" and UnitAffectingCombat(unitstr) then
+        this.glow:SetBackdropBorderColor(1,1,.2)
+        this.glow:Show()
+      elseif this.glow then
+        this.glow:Hide()
+      end
+
+      -- update everything on eventless frames (targettarget, etc)
+      if this.tick then
+        pfUI.uf:RefreshUnit(this, "all")
+      end
+    end
+  end
+
+  -- ============================================================================
+  -- EVENT-BASED UPDATES (Health, Mana, Auras, etc.)
+  -- ============================================================================
+  
+  -- Check if we have pending updates from events
+  local hasUpdates = this.update_full or this.update_base or 
+                     this.update_aura or this.update_portrait or 
+                     this.update_pvp or this.update_indicators
+  
+  -- Track event updates
+  if hasUpdates and pfUI.uf.stats and pfUI.uf.stats.enabled then
+    pfUI.uf.stats.eventUpdates = pfUI.uf.stats.eventUpdates + 1
+  end
+  
+  -- Heartbeat Polling: If no events pending, check if we need fallback
+  if not hasUpdates then
+    local timeSinceEvent = this.lastEventUpdate and (now - this.lastEventUpdate) or 999
+    
+    -- If >0.5s since last event and unit exists, try heartbeat
+    if timeSinceEvent > 0.5 and this.label and _G.UnitExists(this.label .. this.id) then
+      local needsFallback = false
+      
+      -- Check if Nampower can provide data
+      if GetUnitField then
+        -- Use _G.UnitExists to avoid conflicts with range checking
+        local unitstr = this.label .. this.id
+        local exists = _G.UnitExists(unitstr)
+        if exists then
+          local _, guid = _G.UnitExists(unitstr)
+          if guid then
+            local hp = GetUnitField(guid, "health")
+            if not hp or hp == 0 then
+              needsFallback = true
+            end
+          else
+            needsFallback = true
+          end
+        else
+          needsFallback = true
+        end
+      else
+        needsFallback = true
+      end
+      
+      if needsFallback then
+        -- Throttle fallback updates to 0.1s (same as raid/party throttle)
+        if (this.fallbackTick or 0) > now then
+          if pfUI.uf.stats and pfUI.uf.stats.enabled then
+            pfUI.uf.stats.earlyReturns = pfUI.uf.stats.earlyReturns + 1
+          end
+          return
+        end
+        this.fallbackTick = now + 0.1
+        
+        -- Nampower not available or no data - trigger fallback update
+        this.update_base = true
+        if pfUI.uf.stats and pfUI.uf.stats.enabled then
+          pfUI.uf.stats.heartbeatUpdates = pfUI.uf.stats.heartbeatUpdates + 1
+        end
+      else
+        -- Nampower working fine, no update needed
+        if pfUI.uf.stats and pfUI.uf.stats.enabled then
+          pfUI.uf.stats.earlyReturns = pfUI.uf.stats.earlyReturns + 1
+        end
+        return
+      end
+    else
+      -- Too soon or unit doesn't exist
+      if pfUI.uf.stats and pfUI.uf.stats.enabled then
+        pfUI.uf.stats.earlyReturns = pfUI.uf.stats.earlyReturns + 1
+      end
+      return
+    end
   end
 
   -- process indicator update events
@@ -1087,61 +1407,6 @@ function pfUI.uf.OnUpdate()
       this.ressIcon:Show()
     else
       this.ressIcon:Hide()
-    end
-  end
-
-  -- Combat/Aggro Indicators (separate throttle, works for all frames including player)
-  if not this.lastCombatCheck then this.lastCombatCheck = GetTime() + 0.2 end
-  if this.lastCombatCheck < GetTime() then
-    this.lastCombatCheck = GetTime() + 0.2
-    
-    if this.config.squareaggro == "1" and pfUI.api.UnitHasAggro(this.label .. this.id) > 0 then
-      this.combat.tex:SetTexture(1,.2,0)
-      this.combat:Show()
-    elseif this.config.squarecombat == "1" and UnitAffectingCombat(this.label .. this.id) then
-      this.combat.tex:SetTexture(1,1,.2)
-      this.combat:Show()
-    else
-      this.combat:Hide()
-    end
-  end
-
-  -- trigger eventless actions (online/offline/range)
-  if not this.lastTick then this.lastTick = GetTime() + (this.tick or .2) end
-  if this.lastTick and this.lastTick < GetTime() then
-    local unitstr = this.label .. this.id
-
-    this.lastTick = GetTime() + (this.tick or .2)
-
-    -- target target has a huge delay, make sure to not tick during range checks
-    -- by waiting for a stable name over three ticks otherwise aborting the update.
-    if this.label == "targettarget" or this.label == "targettargettarget" then
-      local name = UnitName(this.label)
-      if name ~= this.namebuf1 then
-        this.namebuf1 = name
-        return
-      elseif name ~= this.namebuf2 then
-        this.namebuf2 = name
-        return
-      end
-    end
-
-    pfUI.uf:RefreshUnitState(this)
-    pfUI.uf:RefreshIndicators(this)
-
-    if this.config.glowaggro == "1" and pfUI.api.UnitHasAggro(this.label .. this.id) > 0 then
-      this.glow:SetBackdropBorderColor(1,.2,0)
-      this.glow:Show()
-    elseif this.config.glowcombat == "1" and UnitAffectingCombat(this.label .. this.id) then
-      this.glow:SetBackdropBorderColor(1,1,.2)
-      this.glow:Show()
-    else
-      this.glow:Hide()
-    end
-
-    -- update everything on eventless frames (targettarget, etc)
-    if this.tick then
-      pfUI.uf:RefreshUnit(this, "all")
     end
   end
 end
@@ -1939,9 +2204,8 @@ function pfUI.uf:RefreshUnit(unit, component)
 
   -- base frame
   if component == "all" or component == "base" then
-    -- Unit HP/MP
-    local hp, hpmax = UnitHealth(unitstr), UnitHealthMax(unitstr)
-    local power, powermax = UnitMana(unitstr), UnitManaMax(unitstr)
+    -- Unit HP/MP with Nampower Integration
+    local hp, hpmax, power, powermax, powerType = pfUI.api.GetUnitStats(unitstr)
 
     if unit.config.invert_healthbar == "1" then
       hp = hpmax - hp
@@ -2506,11 +2770,11 @@ function pfUI.uf:GetStatusValue(unit, pos)
     config = "unit"
   end
 
-
-  local mp, mpmax = UnitMana(unitstr), UnitManaMax(unitstr)
-  local hp, hpmax = UnitHealth(unitstr), UnitHealthMax(unitstr)
+  -- Get stats with Nampower Integration
+  local hp, hpmax, mp, mpmax, powerType = pfUI.api.GetUnitStats(unitstr)
   local rhp, rhpmax = hp, hpmax
 
+  -- Use libhealth for mob health estimation (overrides Nampower/Standard)
   if pfUI.libhealth and pfUI.libhealth.enabled then
     rhp, rhpmax = pfUI.libhealth:GetUnitHealth(unitstr)
   elseif unit.label == "target" and (MobHealth3 or MobHealthFrame) and MobHealth_GetTargetCurHP() then
@@ -2680,4 +2944,71 @@ function pfUI.uf.GetColor(self, preset)
   end
 
   return rgbhex(r,g,b)
+end
+
+-- ============================================================================
+-- Slash Commands for Stats Frame
+-- ============================================================================
+_G.SLASH_PFUISTATS1 = "/pfuistats"
+_G.SLASH_PFUISTATS2 = "/ufstats"
+_G.SlashCmdList["PFUISTATS"] = function(msg)
+  msg = string.lower(msg or "")
+  
+  if not pfUI.uf.stats then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffff0000ERROR:|r Stats not initialized!")
+    return
+  end
+  
+  -- Initialize startTime on first use
+  if pfUI.uf.stats.startTime == 0 then
+    pfUI.uf.stats.startTime = GetTime()
+  end
+  
+  if msg == "reset" then
+    pfUI.uf.stats.eventUpdates = 0
+    pfUI.uf.stats.heartbeatUpdates = 0
+    pfUI.uf.stats.earlyReturns = 0
+    pfUI.uf.stats.nampowerUsed = 0
+    pfUI.uf.stats.fallbackUsed = 0
+    pfUI.uf.stats.throttledSkips = 0
+    pfUI.uf.stats.startTime = GetTime()
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00pfUI Stats:|r Reset!")
+    
+  elseif msg == "toggle" then
+    pfUI.uf.stats.enabled = not pfUI.uf.stats.enabled
+    local status = pfUI.uf.stats.enabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00pfUI Stats:|r Tracking: " .. status)
+    
+  elseif msg == "show" then
+    if pfUI.uf.statsFrame then
+      pfUI.uf.statsFrame:Show()
+      DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00pfUI Stats:|r Frame shown")
+    end
+    
+  elseif msg == "hide" then
+    if pfUI.uf.statsFrame then
+      pfUI.uf.statsFrame:Hide()
+      DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00pfUI Stats:|r Frame hidden")
+    end
+    
+  else
+    -- Toggle frame (default action)
+    if pfUI.uf.statsFrame then
+      if pfUI.uf.statsFrame:IsShown() then
+        pfUI.uf.statsFrame:Hide()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00pfUI Stats:|r Frame hidden")
+      else
+        pfUI.uf.statsFrame:Show()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00pfUI Stats:|r Frame shown")
+      end
+    end
+  end
+end
+
+-- Startup messages
+DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfUI|r Nampower Integration loaded! Type |cffffcc00/pfuistats|r to toggle stats")
+if GetUnitField then
+  DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfUI|r |cff00ff00Nampower detected!|r Using direct memory access for health/mana")
+else
+  DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfUI|r |cffff8800Nampower not found|r - using standard API")
 end
