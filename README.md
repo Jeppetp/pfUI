@@ -1,6 +1,6 @@
 # pfUI - Turtle WoW Enhanced Edition (Experiment Branch)
 
-[![Version](https://img.shields.io/badge/version-7.1.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
+[![Version](https://img.shields.io/badge/version-7.2.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
 [![Turtle WoW](https://img.shields.io/badge/Turtle%20WoW-1.18.0-brightgreen.svg)](https://turtlecraft.gg/)
 [![SuperWoW](https://img.shields.io/badge/SuperWoW-REQUIRED-purple.svg)](https://github.com/balakethelock/SuperWoW)
 [![Nampower](https://img.shields.io/badge/Nampower-REQUIRED-yellow.svg)](https://gitea.com/avitasia/nampower)
@@ -35,6 +35,66 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 - ✅ You want a stable, battle-tested build
 - ✅ You don't have Nampower
 - ✅ You prefer reliability over bleeding-edge features
+
+---
+
+## 🎯 What's New in Version 7.2.0 (January 24, 2026)
+
+### 🐱 Druid Secondary Mana Bar Overhaul
+
+**Complete rewrite using Nampower's `GetUnitField` API:**
+
+The Druid Mana Bar feature (showing base mana while in shapeshift form) has been completely rewritten to use Nampower's native `GetUnitField` instead of the deprecated `UnitMana()` extended return values.
+
+**Key Changes:**
+
+| Component | Before (7.1.0) | After (7.2.0) |
+|-----------|----------------|---------------|
+| Data Source | `UnitMana()` second return value | `GetUnitField(guid, "power1")` |
+| Player Support | ✅ Druids only | ✅ Druids only |
+| Target Support | ❌ Limited/broken | ✅ All classes can see Druid mana in all forms |
+| Target-of-Target | ❌ Not available | ✅ Full support added |
+| Text Settings | Hardcoded format | Respects Power Bar text config |
+
+![alt text](https://i.ibb.co/bgfC04Gk/grafik.png)
+
+**New Features:**
+- ✅ **Target Secondary Mana:** See enemy/friendly Druid's base mana while they're in Cat/Bear form
+- ✅ **Target-of-Target Secondary Mana:** Same functionality for ToT frame
+- ✅ **Respects Power Text Settings:** Uses same format as your Power Bar configuration (`powerdyn`, `power`, `powerperc`, `none`, etc.)
+- ✅ **Available for ALL Classes:** Any class can now see Druid mana bars (controlled by "Show Druid Mana Bar" setting)
+
+**Technical Implementation:**
+```lua
+-- OLD: Extended UnitMana (unreliable for other units)
+local _, baseMana = UnitMana("target")  -- Often returns nil for non-player
+
+-- NEW: Direct field access via Nampower
+local _, guid = UnitExists("target")
+local baseMana = GetUnitField(guid, "power1")      -- Base mana
+local baseMaxMana = GetUnitField(guid, "maxPower1") -- Max base mana
+```
+
+### 🧹 Major Code Cleanup
+
+**superwow.lua:**
+- ❌ Removed legacy `pfDruidMana` bar (old SuperWoW-style implementation)
+- ❌ Removed `UnitMana()` fallback code
+- ✅ Unified all secondary mana bars to use `GetUnitField`
+- ✅ Fixed text centering issue (was using `SetJustifyH("RIGHT")`)
+
+**nampower.lua - Massive Cleanup:**
+
+Removed significant amounts of dead/unused code:
+
+| Removed Feature | Reason |
+|-----------------|--------|
+| Buff tracking system | Data collected but never displayed |
+| HoT Detection (AURA_CAST events) | `OnHotApplied` callback never implemented |
+| Swing Timer (`GetSwingTimers()`) | Never called anywhere in codebase |
+| UNIT_DIED buff/debuff cleanup | Now handled by libdebuff |
+
+**Result:** Cleaner, more maintainable code with reduced memory footprint.
 
 ---
 
@@ -189,6 +249,8 @@ end
 |---------|---------|---------------|
 | `GetUnitField(guid, "aura")` | Single call returns all 48 aura spell IDs | `array[48]` of spell IDs |
 | `GetUnitField(guid, "auraApplications")` | Stack counts for all auras | `array[48]` of stack counts |
+| `GetUnitField(guid, "power1")` | Base mana for shapeshifted Druids | Mana value (7.2.0) |
+| `GetUnitField(guid, "maxPower1")` | Max base mana | Max mana value (7.2.0) |
 | `AURA_CAST_ON_OTHER` | Instant debuff cast detection | spellId, casterGuid, targetGuid, **durationMs** |
 | `AURA_CAST_ON_SELF` | Instant self-buff detection | Same as above |
 | `BUFF_REMOVED_OTHER` | Instant aura removal detection | guid, **slot**, spellId, stackCount |
@@ -211,9 +273,10 @@ Master uses **none** of these - it relies on:
 | Detect debuff removal | Polling / timeout | `BUFF_REMOVED_OTHER` event | **Instant** |
 | Detect new debuff | Chat message delay | `AURA_CAST_ON_OTHER` event | **Instant** |
 | Caster identification | Not available | Event provides `casterGuid` | **New capability** |
+| Druid mana (other units) | Not available | `GetUnitField(guid, "power1")` | **New in 7.2.0** |
 | Memory usage | ~50KB | ~200KB | 4x more (negligible) |
 
-### Memory Management (7.1.0 Fixes)
+### Memory Management (7.1.0+ Fixes)
 
 | Table | Before 7.1.0 | After 7.1.0 |
 |-------|--------------|-------------|
@@ -224,7 +287,16 @@ Master uses **none** of these - it relies on:
 
 ---
 
-## 📋 File Changes Summary (7.1.0)
+## 📋 File Changes Summary
+
+### Version 7.2.0
+
+| File | Location | Changes |
+|------|----------|---------|
+| `superwow.lua` | `modules/` | Removed legacy pfDruidMana, added Target/ToT secondary mana bars, GetUnitField for all mana queries, respect Power Bar text settings |
+| `nampower.lua` | `modules/` | Major cleanup: removed dead buff tracking, HoT detection, swing timer code |
+
+### Version 7.1.0
 
 | File | Location | Changes |
 |------|----------|---------|
@@ -281,6 +353,22 @@ If `nil`, Nampower is not installed correctly!
 ---
 
 ## 📜 Changelog
+
+### 7.2.0 (January 24, 2026)
+
+**Added:**
+- ✅ Target Secondary Mana Bar (see Druid mana while in shapeshift form)
+- ✅ Target-of-Target Secondary Mana Bar
+- ✅ Secondary Mana Bars now respect Power Bar text settings
+
+**Changed:**
+- 🔧 Secondary Mana Bars now use `GetUnitField(guid, "power1")` instead of `UnitMana()`
+- 🔧 "Show Druid Mana Bar" setting now available for ALL classes (not just Druids)
+
+**Removed:**
+- ❌ Legacy `pfDruidMana` bar (replaced by `pfPlayerSecondaryMana`)
+- ❌ `UnitMana()` extended return value fallback
+- ❌ Dead code in nampower.lua: buff tracking, HoT detection, swing timer
 
 ### 7.1.0 (January 24, 2026)
 
@@ -349,4 +437,4 @@ Same as original pfUI: GNU General Public License v3.0
 ---
 
 *Last Updated: January 24, 2026*
-*Version: 7.1.0-experimental*
+*Version: 7.2.0-experimental*
