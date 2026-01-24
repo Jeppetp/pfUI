@@ -1180,13 +1180,11 @@ function pfUI.uf.OnUpdate()
     
     -- Only keep cache for units that currently exist
     if pfUI.api.lastUnitStats then
-      local cleanedCache = {}
-      for unitstr, data in pairs(pfUI.api.lastUnitStats) do
-        if _G.UnitExists(unitstr) then
-          cleanedCache[unitstr] = data
+      for unitstr in pairs(pfUI.api.lastUnitStats) do
+        if not _G.UnitExists(unitstr) then
+          pfUI.api.lastUnitStats[unitstr] = nil
         end
       end
-      pfUI.api.lastUnitStats = cleanedCache
     end
   end
   

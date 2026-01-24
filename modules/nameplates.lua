@@ -79,6 +79,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   local CastEvents = {}     -- guid -> cast info
   local debuffCache = {}    -- guid -> { [spellID] = { start, duration } }
   local threatMemory = {}   -- guid -> true if mob had player targeted
+  local debuffSeen = {}     -- reusable table for debuff tracking (avoid GC churn)
 
   -- wipe polyfill
   local wipe = wipe or function(t) for k in pairs(t) do t[k] = nil end end
@@ -513,14 +514,14 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
         -- Track debuff start times for duration display
         if debuffdurations then
           if not debuffCache[guid] then debuffCache[guid] = {} end
-          local seen = {}
+          wipe(debuffSeen)
 
           -- Scan current debuffs and track new ones
           for i = 1, 16 do
             local texture, stacks, dtype, spellID = UnitDebuff(guid, i)
             if not texture then break end
 
-            seen[spellID] = true
+            debuffSeen[spellID] = true
             if not debuffCache[guid][spellID] then
               -- New debuff - record start time and lookup duration
               local spellName = SpellInfo(spellID)
@@ -531,7 +532,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
 
           -- Clear expired debuffs from cache
           for spellID in pairs(debuffCache[guid]) do
-            if not seen[spellID] then
+            if not debuffSeen[spellID] then
               debuffCache[guid][spellID] = nil
             end
           end

@@ -386,6 +386,20 @@ local function CleanupOutOfRangeUnits()
       if objectsByGuid[guid] then objectsByGuid[guid] = nil end
     end
   end
+  
+  -- Cleanup old lastCastRanks entries (older than 3 seconds - only needed for 2s)
+  for spell, data in pairs(lastCastRanks) do
+    if now - data.time > 3 then
+      lastCastRanks[spell] = nil
+    end
+  end
+  
+  -- Cleanup old lastFailedSpells entries (older than 2 seconds)
+  for spell, data in pairs(lastFailedSpells) do
+    if now - data.time > 2 then
+      lastFailedSpells[spell] = nil
+    end
+  end
 end
 
 -- Speichert die Ranks der zuletzt gecasteten Spells (bleibt länger als pending)
