@@ -846,16 +846,7 @@ function pfUI.uf:UpdateConfig()
       f.buffs[i].stacks:SetShadowOffset(0.8, -0.8)
       f.buffs[i].stacks:SetTextColor(1,1,.5)
 
-      f.buffs[i].cd = f.buffs[i].cd or CreateFrame(COOLDOWN_FRAME_TYPE, f.buffs[i]:GetName() .. "Cooldown", f.buffs[i], "CooldownFrameTemplate")
-      f.buffs[i].cd.pfCooldownType = "ALL"
-      f.buffs[i].cd.pfCooldownStyleText = cooldown_text
-      f.buffs[i].cd.pfCooldownStyleAnimation = cooldown_anim
-      f.buffs[i].id = i
-      f.buffs[i]:Hide()
-
       f.buffs[i]:SetFrameLevel(12)
-      CreateBackdrop(f.buffs[i], default_border)
-
       f.buffs[i]:RegisterForClicks("RightButtonUp")
       f.buffs[i]:ClearAllPoints()
 
@@ -889,6 +880,25 @@ function pfUI.uf:UpdateConfig()
 
       f.buffs[i]:SetWidth(f.config.buffsize)
       f.buffs[i]:SetHeight(f.config.buffsize)
+      
+      -- Create CD frame if it doesn't exist
+      if not f.buffs[i].cd then
+        f.buffs[i].cd = CreateFrame(COOLDOWN_FRAME_TYPE, f.buffs[i]:GetName() .. "Cooldown", f.buffs[i], "CooldownFrameTemplate")
+      end
+      
+      -- Always update CD properties (in case size changed)
+      local cdScale = f.config.buffsize / 32
+      f.buffs[i].cd:ClearAllPoints()
+      f.buffs[i].cd:SetScale(cdScale)
+      f.buffs[i].cd:SetAllPoints(f.buffs[i])
+      f.buffs[i].cd:SetFrameLevel(14)
+      f.buffs[i].cd.pfCooldownType = "ALL"
+      f.buffs[i].cd.pfCooldownStyleText = cooldown_text
+      f.buffs[i].cd.pfCooldownStyleAnimation = cooldown_anim
+      f.buffs[i].id = i
+      f.buffs[i]:Hide()
+
+      CreateBackdrop(f.buffs[i], default_border)
 
       if f:GetName() == "pfPlayer" then
         f.buffs[i]:SetScript("OnUpdate", BuffOnUpdate)
@@ -927,21 +937,32 @@ function pfUI.uf:UpdateConfig()
       f.debuffs[i].stacks:SetShadowColor(0, 0, 0)
       f.debuffs[i].stacks:SetShadowOffset(0.8, -0.8)
       f.debuffs[i].stacks:SetTextColor(1,1,.5)
-      f.debuffs[i].cd = f.debuffs[i].cd or CreateFrame(COOLDOWN_FRAME_TYPE, f.debuffs[i]:GetName() .. "Cooldown", f.debuffs[i], "CooldownFrameTemplate")
+      
+      f.debuffs[i]:SetFrameLevel(12)
+      f.debuffs[i]:RegisterForClicks("RightButtonUp")
+      f.debuffs[i]:ClearAllPoints()
+      f.debuffs[i]:SetWidth(f.config.debuffsize)
+      f.debuffs[i]:SetHeight(f.config.debuffsize)
+      f.debuffs[i]:SetNormalTexture(nil)
+      
+      -- Create CD frame if it doesn't exist
+      if not f.debuffs[i].cd then
+        f.debuffs[i].cd = CreateFrame(COOLDOWN_FRAME_TYPE, f.debuffs[i]:GetName() .. "Cooldown", f.debuffs[i], "CooldownFrameTemplate")
+      end
+      
+      -- Always update CD properties (in case size changed)
+      local cdScale = f.config.debuffsize / 32
+      f.debuffs[i].cd:ClearAllPoints()
+      f.debuffs[i].cd:SetScale(cdScale)
+      f.debuffs[i].cd:SetAllPoints(f.debuffs[i])
+      f.debuffs[i].cd:SetFrameLevel(14)
       f.debuffs[i].cd.pfCooldownType = "ALL"
       f.debuffs[i].cd.pfCooldownStyleText = cooldown_text
       f.debuffs[i].cd.pfCooldownStyleAnimation = cooldown_anim
       f.debuffs[i].id = i
       f.debuffs[i]:Hide()
 
-      f.debuffs[i]:SetFrameLevel(12)
       CreateBackdrop(f.debuffs[i], default_border)
-
-      f.debuffs[i]:RegisterForClicks("RightButtonUp")
-      f.debuffs[i]:ClearAllPoints()
-      f.debuffs[i]:SetWidth(f.config.debuffsize)
-      f.debuffs[i]:SetHeight(f.config.debuffsize)
-      f.debuffs[i]:SetNormalTexture(nil)
 
       if f:GetName() == "pfPlayer" then
         f.debuffs[i]:SetScript("OnUpdate", DebuffOnUpdate)

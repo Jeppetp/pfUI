@@ -365,19 +365,30 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     plate.debuffs[index].stacks:SetJustifyV("BOTTOM")
     plate.debuffs[index].stacks:SetTextColor(1,1,0)
 
+    -- Read config values for cooldown display (like unitframes does)
+    local cooldown_text = debuffdurations and 1 or 0
+    local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
+
     if pfUI.client <= 11200 then
-      -- create a fake animation frame on vanilla to improve performance
-      plate.debuffs[index].cd = CreateFrame("Frame", plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index])
-      plate.debuffs[index].cd:SetScript("OnUpdate", CooldownFrame_OnUpdateModel)
-      plate.debuffs[index].cd.AdvanceTime = DoNothing
-      plate.debuffs[index].cd.SetSequence = DoNothing
-      plate.debuffs[index].cd.SetSequenceTime = DoNothing
+      -- Use Model frame with CooldownFrameTemplate for proper pie animation in Vanilla
+      plate.debuffs[index].cd = CreateFrame("Model", plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index], "CooldownFrameTemplate")
+      plate.debuffs[index].cd:SetAllPoints(plate.debuffs[index])
+      plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
+      plate.debuffs[index].cd.pfCooldownStyleText = cooldown_text
     else
       -- use regular cooldown animation frames on burning crusade and later
       plate.debuffs[index].cd = CreateFrame(COOLDOWN_FRAME_TYPE, plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index], "CooldownFrameTemplate")
+      -- Setup for animation support
+      local debuffsize = tonumber(C.nameplates.debuffsize) or 20
+      local cdScale = debuffsize / 32
+      plate.debuffs[index].cd:ClearAllPoints()
+      plate.debuffs[index].cd:SetScale(cdScale)
+      plate.debuffs[index].cd:SetAllPoints(plate.debuffs[index])
+      plate.debuffs[index].cd:SetFrameLevel(plate.debuffs[index]:GetFrameLevel() + 1)
+      plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
+      plate.debuffs[index].cd.pfCooldownStyleText = cooldown_text
     end
 
-    plate.debuffs[index].cd.pfCooldownStyleAnimation = 0
     plate.debuffs[index].cd.pfCooldownType = "ALL"
   end
 
@@ -412,6 +423,20 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
 
     nameplate.debuffs[i]:SetWidth(tonumber(C.nameplates.debuffsize))
     nameplate.debuffs[i]:SetHeight(tonumber(C.nameplates.debuffsize))
+    
+    -- Update cooldown display settings
+    if nameplate.debuffs[i].cd then
+      local cooldown_text = debuffdurations and 1 or 0
+      local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
+      nameplate.debuffs[i].cd.pfCooldownStyleText = cooldown_text
+      nameplate.debuffs[i].cd.pfCooldownStyleAnimation = cooldown_anim
+      
+      -- Update scale for TBC+
+      if pfUI.client > 11200 then
+        local cdScale = debuffsize / 32
+        nameplate.debuffs[i].cd:SetScale(cdScale)
+      end
+    end
   end
 
   -- create nameplate core
@@ -1173,7 +1198,18 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
           end
 
           if duration and timeleft and debuffdurations then
-            plate.debuffs[index].cd:SetAlpha(0)
+            -- Ensure cooldown flags are set
+            local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
+            if plate.debuffs[index].cd.pfCooldownStyleText == nil then
+              plate.debuffs[index].cd.pfCooldownStyleText = 1
+            end
+            if plate.debuffs[index].cd.pfCooldownStyleAnimation == nil then
+              plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
+            end
+            plate.debuffs[index].cd.pfCooldownType = "ALL"
+            
+            -- Set alpha based on animation config (0 = hide animation, 1 = show)
+            plate.debuffs[index].cd:SetAlpha(cooldown_anim == 1 and 1 or 0)
             plate.debuffs[index].cd:Show()
             CooldownFrame_SetTimer(plate.debuffs[index].cd, GetTime() + timeleft - duration, duration, 1)
           end
@@ -1610,6 +1646,9 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   nameplates.UpdateConfig = function()
     -- Refresh config cache for all cfg.* values
     CacheConfig()
+    
+    -- Update debuffdurations from appearance config
+    debuffdurations = C.appearance.cd.debuffs == "1" and true or nil
     
     -- update debuff filters
     DebuffFilterPopulate()
