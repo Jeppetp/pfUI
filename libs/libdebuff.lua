@@ -1359,7 +1359,10 @@ if hasNampower then
       -- Add to ownSlots if ours
       if isOurs then
         ownSlots[guid][slot] = spellName
-        ownDebuffs[guid][spellName].slot = slot
+        -- Safety: only set slot if entry exists in ownDebuffs
+        if ownDebuffs[guid] and ownDebuffs[guid][spellName] then
+          ownDebuffs[guid][spellName].slot = slot
+        end
       end
       
       -- Cleanup orphaned debuffs
