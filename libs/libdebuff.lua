@@ -370,6 +370,12 @@ local function CleanupPendingCasts()
   end
 end
 
+-- Speichert die Ranks der zuletzt gecasteten Spells (bleibt länger als pending)
+local lastCastRanks = {}
+
+-- Speichert Spells die gefailed sind (miss/dodge/parry/etc.) für 1 Sekunde
+local lastFailedSpells = {}
+
 -- Cleanup out of range units (every 30s)
 local function CleanupOutOfRangeUnits()
   local now = GetTime()
@@ -401,12 +407,6 @@ local function CleanupOutOfRangeUnits()
     end
   end
 end
-
--- Speichert die Ranks der zuletzt gecasteten Spells (bleibt länger als pending)
-local lastCastRanks = {}
-
--- Speichert Spells die gefailed sind (miss/dodge/parry/etc.) für 1 Sekunde
-local lastFailedSpells = {}
 
 -- Prüft ob ein Spell kürzlich gefailed ist (öffentliche Funktion für andere Module)
 function libdebuff:DidSpellFail(spell)
