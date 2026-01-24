@@ -56,7 +56,7 @@ The Druid Mana Bar feature (showing base mana while in shapeshift form) has been
 | Target-of-Target | ❌ Not available | ✅ Full support added |
 | Text Settings | Hardcoded format | Respects Power Bar text config |
 
-!(https://i.ibb.co/bgfC04Gk/grafik.png)
+<img width="704" height="210" alt="grafik" src="https://i.ibb.co/bgfC04Gk/grafik.png" />
 
 **New Features:**
 - ✅ **Target Secondary Mana:** See enemy/friendly Druid's base mana while they're in Cat/Bear form
