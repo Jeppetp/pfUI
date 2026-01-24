@@ -53,14 +53,12 @@ The Druid Mana Bar feature (showing base mana while in shapeshift form) has been
 | Data Source | `UnitMana()` second return value | `GetUnitField(guid, "power1")` |
 | Player Support | ✅ Druids only | ✅ Druids only |
 | Target Support | ❌ Limited/broken | ✅ All classes can see Druid mana in all forms |
-| Target-of-Target | ❌ Not available | ✅ Full support added |
 | Text Settings | Hardcoded format | Respects Power Bar text config |
 
 <img width="704" height="210" alt="grafik" src="https://i.ibb.co/bgfC04Gk/grafik.png" />
 
 **New Features:**
 - ✅ **Target Secondary Mana:** See enemy/friendly Druid's base mana while they're in Cat/Bear form
-- ✅ **Target-of-Target Secondary Mana:** Same functionality for ToT frame
 - ✅ **Respects Power Text Settings:** Uses same format as your Power Bar configuration (`powerdyn`, `power`, `powerperc`, `none`, etc.)
 - ✅ **Available for ALL Classes:** Any class can now see Druid mana bars (controlled by "Show Druid Mana Bar" setting)
 

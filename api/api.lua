@@ -456,7 +456,7 @@ function pfUI.api.Abbreviate(number)
     end
   end
 
-  return number
+  return math.floor(number)
 end
 
 -- [ SendChatMessageWide ]

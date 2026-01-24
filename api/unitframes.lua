@@ -202,11 +202,12 @@ function pfUI.api.GetUnitStats(unitstr, trackStats)
         if powerType == 1 then
           -- Rage (Nampower stores rage * 10)
           local rage = GetUnitField(guid, "power2")
-          power = rage and (rage / 10) or UnitMana(unitstr)
+          power = rage and math.floor(rage / 10) or UnitMana(unitstr)
           maxPower = 100
         elseif powerType == 3 then
           -- Energy
           power = GetUnitField(guid, "power4") or UnitMana(unitstr)
+          if power then power = math.floor(power) end
           maxPower = GetUnitField(guid, "maxPower4") or UnitManaMax(unitstr)
         else
           -- Mana (default)
