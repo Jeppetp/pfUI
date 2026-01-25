@@ -981,7 +981,8 @@ if hasNampower then
       UpdateCarnageRank()
       
     elseif event == "PLAYER_COMBO_POINTS" then
-      if class ~= "DRUID" then return end
+      -- Track combo points for Druid AND Rogue (both use CP-based abilities)
+      if class ~= "DRUID" and class ~= "ROGUE" then return end
       local current = GetComboPoints("player", "target") or 0
       if current < currentComboPoints then
         lastSpentComboPoints = currentComboPoints
@@ -1031,8 +1032,8 @@ if hasNampower then
         debugStats.aura_cast = debugStats.aura_cast + 1
       end
       
-      -- CP-based spells: GetDuration (ONLY for our casts!)
-      if isOurs and duration == 0 and combopointAbilities[spellName] then
+      -- CP-based spells: ALWAYS use GetDuration for our casts (event duration is base only!)
+      if isOurs and combopointAbilities[spellName] then
         duration = libdebuff:GetDuration(spellName, rankNum)
       end
       
