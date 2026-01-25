@@ -1,6 +1,6 @@
 # pfUI - Turtle WoW Enhanced Edition (Experiment Branch)
 
-[![Version](https://img.shields.io/badge/version-7.2.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
+[![Version](https://img.shields.io/badge/version-7.3.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
 [![Turtle WoW](https://img.shields.io/badge/Turtle%20WoW-1.18.0-brightgreen.svg)](https://turtlecraft.gg/)
 [![SuperWoW](https://img.shields.io/badge/SuperWoW-REQUIRED-purple.svg)](https://github.com/balakethelock/SuperWoW)
 [![Nampower](https://img.shields.io/badge/Nampower-REQUIRED-yellow.svg)](https://gitea.com/avitasia/nampower)
@@ -35,6 +35,61 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 - ✅ You want a stable, battle-tested build
 - ✅ You don't have Nampower
 - ✅ You prefer reliability over bleeding-edge features
+
+---
+
+## 🎯 What's New in Version 7.3.0 (January 25, 2026)
+
+### ⚡ O(1) Performance Optimizations for Unitframes
+
+**Complete rewrite of health/mana lookups using Nampower's `GetUnitField` API:**
+
+The unitframes now use direct memory access via `GetUnitField(guid, "health")` instead of the slower `UnitHealth()` API calls. This provides significant performance improvements especially in raids.
+
+**Key Changes:**
+
+| Component | Before (7.2.0) | After (7.3.0) |
+|-----------|----------------|---------------|
+| HealPredict Health | `UnitHealth()` API calls | `GetUnitField(guid, "health")` O(1) |
+| Health Bar Colors | 4x redundant API calls per update | Uses cached `hp_orig`/`hpmax_orig` values |
+| GetColor Function | `UnitHealth()` API calls | `GetUnitField(guid, "health")` O(1) |
+
+**Fallback Support:**
+- Automatic fallback to `UnitHealth()` when Nampower not available
+- Automatic fallback for units >180 yards (out of Nampower range)
+- Automatic fallback when GUID unavailable
+
+### 🚀 Smart Roster Updates (No More Freeze!)
+
+**GUID-based tracking eliminates screen freezes when swapping raid groups:**
+
+Previously, any raid roster change would trigger a full update of ALL 40 raid frames, causing noticeable freezes. Now, only frames where the actual player changed get updated.
+
+**How it works:**
+```lua
+-- OLD: RAID_ROSTER_UPDATE → ALL 40 frames update_full = true → FREEZE
+-- NEW: RAID_ROSTER_UPDATE → Check GUID per frame → Only changed frames update
+```
+
+| Scenario | Before (7.2.0) | After (7.3.0) |
+|----------|----------------|---------------|
+| Swap 2 players | 40 frame updates | 2 frame updates |
+| Player joins | 40 frame updates | 1 frame update |
+| Player leaves | 40 frame updates | 1 frame update |
+| No changes | 40 frame updates | 0 frame updates |
+
+**Technical Implementation:**
+- `pfUI.uf.guidTracker` tracks GUID per frame
+- On roster change, compares old GUID vs new GUID
+- Only sets `update_full = true` if GUID actually changed
+- Also forces `update_aura = true` to refresh buffs/debuffs
+
+### 🔧 libpredict.lua Optimizations
+
+**Eliminated redundant `UnitName()` calls:**
+- `UnitGetIncomingHeals()`: Removed double `UnitName()` call
+- `UnitHasIncomingResurrection()`: Removed double `UnitName()` call  
+- `UNIT_HEALTH` event handler: Reuses cached name variable
 
 ---
 
@@ -287,6 +342,14 @@ Master uses **none** of these - it relies on:
 
 ## 📋 File Changes Summary
 
+### Version 7.3.0
+
+| File | Location | Changes |
+|------|----------|---------|
+| `unitframes.lua` | `api/` | O(1) GetUnitField for HealPredict, cached hp values for colors, GUID tracker for smart roster updates |
+| `libpredict.lua` | `libs/` | Eliminated redundant UnitName() calls in UnitGetIncomingHeals, UnitHasIncomingResurrection, UNIT_HEALTH handler |
+| `raid.lua` | `modules/` | Smart GUID-based roster updates - only changed frames get updated |
+
 ### Version 7.2.0
 
 | File | Location | Changes |
@@ -351,6 +414,23 @@ If `nil`, Nampower is not installed correctly!
 ---
 
 ## 📜 Changelog
+
+### 7.3.0 (January 25, 2026)
+
+**Added:**
+- ✅ O(1) `GetUnitField()` lookups for health in HealPredict
+- ✅ O(1) `GetUnitField()` lookups for health in GetColor function
+- ✅ GUID-based roster tracking (`pfUI.uf.guidTracker`)
+- ✅ Smart roster updates - only changed frames refresh
+
+**Changed:**
+- 🔧 Health bar colors now use cached `hp_orig`/`hpmax_orig` (no redundant API calls)
+- 🔧 `raid.lua` now handles GUID comparison after frame ID assignment
+- 🔧 `libpredict.lua` optimized to avoid double `UnitName()` calls
+
+**Fixed:**
+- 🔧 Screen freeze when swapping raid groups (40 updates → only changed frames)
+- 🔧 Auras not refreshing on frame swap (now forces `update_aura = true`)
 
 ### 7.2.0 (January 24, 2026)
 
@@ -434,5 +514,5 @@ Same as original pfUI: GNU General Public License v3.0
 
 ---
 
-*Last Updated: January 24, 2026*
-*Version: 7.2.0-experimental*
+*Last Updated: January 25, 2026*
+*Version: 7.3.0-experimental*
