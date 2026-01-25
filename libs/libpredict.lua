@@ -109,8 +109,8 @@ libpredict:SetScript("OnEvent", function()
     this:ParseChatMessage(arg4, arg2, arg1)
   elseif event == "UNIT_HEALTH" then
     local name = UnitName(arg1)
-    if ress[name] and not UnitIsDeadOrGhost(arg1) then
-      ress[UnitName(arg1)] = nil
+    if name and ress[name] and not UnitIsDeadOrGhost(arg1) then
+      ress[name] = nil  -- Reuse 'name' variable instead of calling UnitName again
     end
   elseif event == "UNIT_CASTEVENT" and superwow_active then
     -- arg1 = casterGUID, arg2 = targetGUID, arg3 = event type, arg4 = spellId, arg5 = castTime
@@ -447,9 +447,10 @@ function libpredict:RessStop(sender)
 end
 
 function libpredict:UnitGetIncomingHeals(unit)
-  if not unit or not UnitName(unit) then return 0 end
-  if UnitIsDeadOrGhost(unit) then return 0 end
+  if not unit then return 0 end
   local name = UnitName(unit)
+  if not name then return 0 end
+  if UnitIsDeadOrGhost(unit) then return 0 end
 
   local sumheal = 0
   if not heals[name] then
@@ -468,8 +469,9 @@ function libpredict:UnitGetIncomingHeals(unit)
 end
 
 function libpredict:UnitHasIncomingResurrection(unit)
-  if not unit or not UnitName(unit) then return nil end
+  if not unit then return nil end
   local name = UnitName(unit)
+  if not name then return nil end
 
   if not ress[name] then
     return nil

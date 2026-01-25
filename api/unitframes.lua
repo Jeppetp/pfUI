@@ -14,6 +14,20 @@ end)
 pfUI.uf.frames = {}
 pfUI.uf.delayed = {}
 
+-- ============================================================================
+-- GUID-based Roster Tracking for Smart Updates
+-- Only updates frames where the unit actually changed, not ALL 40 frames
+-- ============================================================================
+pfUI.uf.guidTracker = {
+  -- Maps frame to its last known GUID: frame -> guid
+  frameToGuid = {},
+}
+
+-- Clear all GUID tracking (forces full update next time)
+function pfUI.uf.ClearGuidTracking()
+  pfUI.uf.guidTracker.frameToGuid = {}
+end
+
 -- slash command to toggle unitframe test mode
 _G.SLASH_PFTEST1, _G.SLASH_PFTEST2 = "/pftest", "/pfuftest"
 _G.SlashCmdList.PFTEST = function()
@@ -1009,16 +1023,36 @@ function pfUI.uf.OnEvent()
   -- update regular frames
   if event == "PLAYER_ENTERING_WORLD" then
     this.update_full = true
+    -- Clear GUID tracking on zone change for full rebuild
+    if pfUI.uf.ClearGuidTracking then pfUI.uf.ClearGuidTracking() end
   elseif this.label == "target" and event == "PLAYER_TARGET_CHANGED" and not pfScanActive == true then
     this.update_full = true
   elseif ( this.label == "raid" or this.label == "party" or this.label == "player" ) and event == "PARTY_MEMBERS_CHANGED" then
-    this.update_full = true
+    -- Smart update: check if THIS frame's unit actually changed
+    if pfUI.uf.guidTracker and this.id then
+      local unit = this.label == "player" and "player" or (this.label .. this.id)
+      local _, newGuid = UnitExists(unit)
+      local oldGuid = pfUI.uf.guidTracker.frameToGuid[this]
+      if newGuid ~= oldGuid then
+        pfUI.uf.guidTracker.frameToGuid[this] = newGuid
+        this.update_full = true
+      end
+    else
+      this.update_full = true
+    end
   elseif ( this.label == "raid" or this.label == "party" ) and event == "PARTY_MEMBER_ENABLE" then
     this.update_full = true
   elseif ( this.label == "raid" or this.label == "party" ) and event == "PARTY_MEMBER_DISABLE" then
     this.update_full = true
   elseif ( this.label == "raid" or this.label == "party" ) and event == "RAID_ROSTER_UPDATE" then
-    this.update_full = true
+    -- Note: Smart GUID-based updates are handled in raid.lua OnUpdate
+    -- after frame IDs are reassigned. We don't set update_full here anymore
+    -- for raid frames to avoid the freeze.
+    if this.label == "party" then
+      -- Party frames still need the old logic (no smart tracking yet)
+      this.update_full = true
+    end
+    -- Raid frames: update_full is set by raid.lua GUID tracker
   elseif this.label == "pet" and event == "UNIT_PET" then
     this.update_full = true
   elseif this.label == "player" and (event == "PLAYER_AURAS_CHANGED" or event == "UNIT_INVENTORY_CHANGED") then
@@ -1280,7 +1314,20 @@ function pfUI.uf.OnUpdate()
         
         local unit = this.label .. this.id
         local heal = libpredict:UnitGetIncomingHeals(unit)
-        local health, maxHealth = UnitHealth(unit), UnitHealthMax(unit)
+        
+        -- O(1) Nampower lookup via GUID (same pattern as nameplates.lua)
+        local health, maxHealth
+        if GetUnitField then
+          local _, guid = UnitExists(unit)
+          if guid then
+            health = GetUnitField(guid, "health")
+            maxHealth = GetUnitField(guid, "maxHealth")
+          end
+        end
+        -- Fallback to standard API
+        if not health or not maxHealth or maxHealth == 0 then
+          health, maxHealth = UnitHealth(unit), UnitHealthMax(unit)
+        end
 
         if heal - health - maxHealth ~= this.predictstate then
           local overhealperc = tonumber(this.config.overhealperc)
@@ -2311,6 +2358,9 @@ function pfUI.uf:RefreshUnit(unit, component)
   if component == "all" or component == "base" then
     -- Unit HP/MP with Nampower Integration
     local hp, hpmax, power, powermax, powerType = pfUI.api.GetUnitStats(unitstr, true)
+    
+    -- Store original values for color calculations (before invert_healthbar modifies hp)
+    local hp_orig, hpmax_orig = hp, hpmax
 
     if unit.config.invert_healthbar == "1" then
       hp = hpmax - hp
@@ -2330,7 +2380,8 @@ function pfUI.uf:RefreshUnit(unit, component)
     local custom = unit.config.defcolor == "0" and unit.config.custom or C.unitframes.custom
 
     local r, g, b, a = .2, .2, .2, 1
-    if customfullhp == "1" and UnitHealth(unitstr) == UnitHealthMax(unitstr) then
+    -- O(1) optimization: use cached hp/hpmax instead of UnitHealth()/UnitHealthMax() API calls
+    if customfullhp == "1" and hp_orig == hpmax_orig then
       r, g, b, a = GetStringColor(customcolor)
       custom_active = true
     elseif custom == "0" then
@@ -2355,8 +2406,9 @@ function pfUI.uf:RefreshUnit(unit, component)
       r, g, b, a = GetStringColor(customcolor)
       custom_active = true
     elseif custom == "2" then
-      if UnitHealthMax(unitstr) > 0 then
-        r, g, b = GetColorGradient(UnitHealth(unitstr) / UnitHealthMax(unitstr))
+      -- O(1) optimization: use cached hp/hpmax instead of UnitHealth()/UnitHealthMax() API calls
+      if hpmax_orig > 0 then
+        r, g, b = GetColorGradient(hp_orig / hpmax_orig)
       else
         r, g, b = 0, 0, 0
       end
@@ -2368,7 +2420,8 @@ function pfUI.uf:RefreshUnit(unit, component)
 
     if customfade == "1" then
       -- fade custom color into default color
-      local perc = UnitHealth(unitstr) / UnitHealthMax(unitstr)
+      -- O(1) optimization: use cached hp/hpmax instead of UnitHealth()/UnitHealthMax() API calls
+      local perc = hpmax_orig > 0 and (hp_orig / hpmax_orig) or 0
       local cr, cg, cb, ca = GetStringColor(customcolor)
 
       r = (cr*perc) + (r*(1-perc))
@@ -3028,8 +3081,21 @@ function pfUI.uf.GetColor(self, preset)
     b = UnitReactionColor[UnitReaction(unitstr, "player")].b
 
   elseif preset == "health" and config["healthcolor"] == "1" then
-    if UnitHealthMax(unitstr) > 0 then
-      r, g, b = GetColorGradient(UnitHealth(unitstr) / UnitHealthMax(unitstr))
+    -- O(1) Nampower lookup for health gradient color
+    local hp, hpmax
+    if GetUnitField then
+      local _, guid = UnitExists(unitstr)
+      if guid then
+        hp = GetUnitField(guid, "health")
+        hpmax = GetUnitField(guid, "maxHealth")
+      end
+    end
+    -- Fallback to standard API
+    if not hp or not hpmax then
+      hp, hpmax = UnitHealth(unitstr), UnitHealthMax(unitstr)
+    end
+    if hpmax and hpmax > 0 then
+      r, g, b = GetColorGradient(hp / hpmax)
     else
       r, g, b = 0, 0, 0
     end
