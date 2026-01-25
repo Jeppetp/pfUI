@@ -525,7 +525,12 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
             if not debuffCache[guid][spellID] then
               -- New debuff - record start time and lookup duration
               local spellName = SpellInfo(spellID)
-              local duration = L["debuffs"][spellName] and L["debuffs"][spellName][0] or nil
+              -- Use dynamic GetDuration for CP-based abilities (Kidney Shot, Rupture, etc.)
+              local duration = libdebuff and libdebuff.GetDuration and libdebuff:GetDuration(spellName, 0)
+              if not duration or duration == 0 then
+                -- Fallback to static lookup
+                duration = L["debuffs"][spellName] and L["debuffs"][spellName][0] or nil
+              end
               debuffCache[guid][spellID] = { start = GetTime(), duration = duration }
             end
           end
@@ -607,10 +612,6 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     frameState.hasTarget, frameState.targetGuid = UnitExists("target")
     frameState.hasMouseover = UnitExists("mouseover")
 
-    -- Throttle main scanner
-    if (this.tick or 0) > frameState.now then return end
-    this.tick = frameState.now + 0.05
-
     -- propagate events to all nameplates
     if this.eventcache then
       this.eventcache = nil
@@ -619,22 +620,28 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       end
     end
 
-    -- detect new nameplates
-    parentcount = WorldFrame:GetNumChildren()
-    if initialized < parentcount then
-      childs = { WorldFrame:GetChildren() }
-      for i = initialized + 1, parentcount do
-        plate = childs[i]
-        if IsNamePlate(plate) and not registry[plate] then
-          nameplates.OnCreate(plate)
-          registry[plate] = plate
-        end
-      end
+    -- Throttle ONLY the nameplate scanner (not the updates!)
+    local shouldScan = (this.tick or 0) <= frameState.now
+    if shouldScan then
+      this.tick = frameState.now + 0.05
 
-      initialized = parentcount
+      -- detect new nameplates
+      parentcount = WorldFrame:GetNumChildren()
+      if initialized < parentcount then
+        childs = { WorldFrame:GetChildren() }
+        for i = initialized + 1, parentcount do
+          plate = childs[i]
+          if IsNamePlate(plate) and not registry[plate] then
+            nameplates.OnCreate(plate)
+            registry[plate] = plate
+          end
+        end
+
+        initialized = parentcount
+      end
     end
 
-    -- Central OnUpdate for all visible plates
+    -- Central OnUpdate for all visible plates (runs every frame, individual throttle inside)
     for plate in pairs(registry) do
       if plate:IsVisible() then
         nameplates.OnUpdate(plate, frameState)
@@ -1562,7 +1569,13 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
           end
           
           nameplate.castbar:SetValue(barValue)
-          nameplate.castbar.text:SetText(round(now - castInfo.startTime, 1))
+          -- Show remaining time (countdown), not elapsed time
+          local remaining = castInfo.endTime - now
+          if C.unitframes.castbardecimals == "1" then
+            nameplate.castbar.text:SetText(floor(remaining * 10) / 10)
+          else
+            nameplate.castbar.text:SetText(string.format("%.2f", remaining))
+          end
           
           if cfg.spellname then
             nameplate.castbar.spell:SetText(castInfo.spellName)
@@ -1600,7 +1613,14 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
 
           nameplate.castbar:SetMinMaxValues(0, duration/1000)
           nameplate.castbar:SetValue(cur)
-          nameplate.castbar.text:SetText(round(cur,1))
+          -- Show remaining time (countdown), not elapsed time
+          local remaining = max - cur
+          if channel then remaining = cur end  -- Channel already counts down
+          if C.unitframes.castbardecimals == "1" then
+            nameplate.castbar.text:SetText(floor(remaining * 10) / 10)
+          else
+            nameplate.castbar.text:SetText(string.format("%.2f", remaining))
+          end
           
           if C.nameplates.spellname == "1" then
             nameplate.castbar.spell:SetText(effect)

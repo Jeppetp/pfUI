@@ -891,6 +891,15 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
         "7:" .. T["Small"],
         "8:" .. T["Tiny (PixelPerfect)"],
       },
+      ["abbrevnum"] = {
+        "0:" .. T["Full Numbers (4250)"],
+        "1:" .. T["Abbreviate 2 Decimals (4.25k)"],
+        "2:" .. T["Abbreviate 1 Decimal (4.2k)"],
+      },
+      ["castbardecimals"] = {
+        "1:" .. T["1 Decimal (2.1)"],
+        "2:" .. T["2 Decimals (2.14)"],
+      },
       ["orientation"] = {
         "HORIZONTAL:" .. T["Horizontal"],
         "VERTICAL:" .. T["Vertical"],
@@ -1496,7 +1505,8 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
       CreateConfig(nil, T["Disable Errors in UIErrors Frame"], C.global, "errors_hide", "checkbox")
       CreateConfig(nil, T["Highlight Settings That Require Reload"], C.gui, "reloadmarker", "checkbox")
       CreateConfig(nil, T["Show Incompatible Config Entries"], C.gui, "showdisabled", "checkbox")
-      CreateConfig(nil, T["Abbreviate Numbers (4200 -> 4.2k)"], C.unitframes, "abbrevnum", "checkbox")
+      CreateConfig(nil, T["Abbreviate Numbers"], C.unitframes, "abbrevnum", "dropdown", pfUI.gui.dropdowns.abbrevnum)
+      CreateConfig(nil, T["Castbar Timer Decimals"], C.unitframes, "castbardecimals", "dropdown", pfUI.gui.dropdowns.castbardecimals)
       CreateConfig(nil, T["Abbreviate Unit Names"], C.unitframes, "abbrevname", "checkbox")
       CreateConfig(nil, T["Health Point Estimation"], nil, nil, "header")
       CreateConfig(nil, T["Estimate Enemy Health Points"], C.global, "libhealth", "checkbox")

@@ -1,6 +1,6 @@
 # pfUI - Turtle WoW Enhanced Edition (Experiment Branch)
 
-[![Version](https://img.shields.io/badge/version-7.3.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
+[![Version](https://img.shields.io/badge/version-7.4.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
 [![Turtle WoW](https://img.shields.io/badge/Turtle%20WoW-1.18.0-brightgreen.svg)](https://turtlecraft.gg/)
 [![SuperWoW](https://img.shields.io/badge/SuperWoW-REQUIRED-purple.svg)](https://github.com/balakethelock/SuperWoW)
 [![Nampower](https://img.shields.io/badge/Nampower-REQUIRED-yellow.svg)](https://gitea.com/avitasia/nampower)
@@ -23,7 +23,6 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 **Known Issues:**
 - ❌ Not fully tested in 40-man raids
 - ❌ Higher code complexity = more potential bugs
-- ❌ Some edge cases with combo point tracking unverified
 
 **Use This Build If:**
 - ✅ You have SuperWoW + Nampower installed
@@ -38,58 +37,62 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 
 ---
 
-## 🎯 What's New in Version 7.3.0 (January 25, 2026)
+## 🎯 What's New in Version 7.4.0 (January 26, 2026)
 
-### ⚡ O(1) Performance Optimizations for Unitframes
+### 🗡️ Rogue Combo Point Fix
 
-**Complete rewrite of health/mana lookups using Nampower's `GetUnitField` API:**
+**PLAYER_COMBO_POINTS event now works for Rogues:**
 
-The unitframes now use direct memory access via `GetUnitField(guid, "health")` instead of the slower `UnitHealth()` API calls. This provides significant performance improvements especially in raids.
+The combo point tracking was previously only enabled for Druids. Rogues were completely ignored, causing abilities like Kidney Shot to always show base duration (1 sec) instead of the correct CP-scaled duration.
 
-**Key Changes:**
+**Technical Details:**
+- Nampower sends `durationMs=1000` (base duration) for Kidney Shot
+- Code checked `if duration == 0` before calling `GetDuration()` 
+- Since duration was 1 (not 0), the CP calculation was skipped
+- Fix: Always call `GetDuration()` for CP-based abilities, regardless of event duration
 
-| Component | Before (7.2.0) | After (7.3.0) |
-|-----------|----------------|---------------|
-| HealPredict Health | `UnitHealth()` API calls | `GetUnitField(guid, "health")` O(1) |
-| Health Bar Colors | 4x redundant API calls per update | Uses cached `hp_orig`/`hpmax_orig` values |
-| GetColor Function | `UnitHealth()` API calls | `GetUnitField(guid, "health")` O(1) |
+### ⚙️ New Settings: Number & Timer Formatting
 
-**Fallback Support:**
-- Automatic fallback to `UnitHealth()` when Nampower not available
-- Automatic fallback for units >180 yards (out of Nampower range)
-- Automatic fallback when GUID unavailable
+**Abbreviate Numbers (Settings → General):**
 
-### 🚀 Smart Roster Updates (No More Freeze!)
+| Option | Example |
+|--------|---------|
+| Full Numbers | 4250 |
+| 2 Decimals | 4.25k |
+| 1 Decimal | 4.2k (always rounds DOWN) |
 
-**GUID-based tracking eliminates screen freezes when swapping raid groups:**
+**Castbar Timer Decimals (Settings → General):**
 
-Previously, any raid roster change would trigger a full update of ALL 40 raid frames, causing noticeable freezes. Now, only frames where the actual player changed get updated.
+| Option | Example |
+|--------|---------|
+| 1 Decimal | 2.1 |
+| 2 Decimals | 2.14 |
 
-**How it works:**
-```lua
--- OLD: RAID_ROSTER_UPDATE → ALL 40 frames update_full = true → FREEZE
--- NEW: RAID_ROSTER_UPDATE → Check GUID per frame → Only changed frames update
-```
+### 🎬 Nameplate Castbar Improvements
 
-| Scenario | Before (7.2.0) | After (7.3.0) |
-|----------|----------------|---------------|
-| Swap 2 players | 40 frame updates | 2 frame updates |
-| Player joins | 40 frame updates | 1 frame update |
-| Player leaves | 40 frame updates | 1 frame update |
-| No changes | 40 frame updates | 0 frame updates |
+**Smooth Castbar Animation:**
+- Fixed stuttering castbar caused by incorrect throttle placement
+- Scanner throttle (0.05s) now only affects nameplate detection
+- Castbar updates run at full 50 FPS for smooth animation
 
-**Technical Implementation:**
-- `pfUI.uf.guidTracker` tracks GUID per frame
-- On roster change, compares old GUID vs new GUID
-- Only sets `update_full = true` if GUID actually changed
-- Also forces `update_aura = true` to refresh buffs/debuffs
+**Countdown Timer:**
+- Castbar timer now counts DOWN (3.0 → 0.0) instead of up
+- Shows remaining cast time, not elapsed time
 
-### 🔧 libpredict.lua Optimizations
+**Intelligent Throttling (unchanged):**
+- Target OR casting nameplates: 0.02s (50 FPS)
+- All other nameplates: 0.1s (10 FPS)
+- Event updates bypass throttle entirely
 
-**Eliminated redundant `UnitName()` calls:**
-- `UnitGetIncomingHeals()`: Removed double `UnitName()` call
-- `UnitHasIncomingResurrection()`: Removed double `UnitName()` call  
-- `UNIT_HEALTH` event handler: Reuses cached name variable
+### 🧹 Memory Management
+
+**Cache cleanup for hidden nameplates:**
+- `guidRegistry` cleared when plate hides
+- `CastEvents` cleared when plate hides
+- `debuffCache` cleared when plate hides
+- `threatMemory` cleared when plate hides
+
+Prevents memory leaks when mobs die or go out of range.
 
 ---
 
@@ -342,13 +345,16 @@ Master uses **none** of these - it relies on:
 
 ## 📋 File Changes Summary
 
-### Version 7.3.0
+### Version 7.4.0
 
 | File | Location | Changes |
 |------|----------|---------|
-| `unitframes.lua` | `api/` | O(1) GetUnitField for HealPredict, cached hp values for colors, GUID tracker for smart roster updates |
-| `libpredict.lua` | `libs/` | Eliminated redundant UnitName() calls in UnitGetIncomingHeals, UnitHasIncomingResurrection, UNIT_HEALTH handler |
-| `raid.lua` | `modules/` | Smart GUID-based roster updates - only changed frames get updated |
+| `libdebuff.lua` | `libs/` | Rogue PLAYER_COMBO_POINTS fix, always use GetDuration() for CP-abilities |
+| `api.lua` | `api/` | Abbreviate() now supports 3 modes (off/2dec/1dec), 1dec always floors |
+| `config.lua` | `api/` | Added `castbardecimals` option |
+| `gui.lua` | `modules/` | Abbreviate Numbers dropdown, Castbar Timer Decimals dropdown |
+| `nameplates.lua` | `modules/` | Smooth castbar (throttle fix), countdown timer, cache cleanup |
+| `castbar.lua` | `modules/` | FormatCastbarTime() helper, respects castbardecimals config |
 
 ### Version 7.2.0
 
@@ -415,22 +421,22 @@ If `nil`, Nampower is not installed correctly!
 
 ## 📜 Changelog
 
-### 7.3.0 (January 25, 2026)
+### 7.4.0 (January 26, 2026)
 
 **Added:**
-- ✅ O(1) `GetUnitField()` lookups for health in HealPredict
-- ✅ O(1) `GetUnitField()` lookups for health in GetColor function
-- ✅ GUID-based roster tracking (`pfUI.uf.guidTracker`)
-- ✅ Smart roster updates - only changed frames refresh
-
-**Changed:**
-- 🔧 Health bar colors now use cached `hp_orig`/`hpmax_orig` (no redundant API calls)
-- 🔧 `raid.lua` now handles GUID comparison after frame ID assignment
-- 🔧 `libpredict.lua` optimized to avoid double `UnitName()` calls
+- ✅ Castbar Timer Decimals setting (1 or 2 decimals)
+- ✅ Abbreviate Numbers dropdown (Full / 2 Decimals / 1 Decimal)
+- ✅ Nameplate castbar countdown (shows remaining time)
+- ✅ Cache cleanup for hidden nameplates (prevents memory leaks)
 
 **Fixed:**
-- 🔧 Screen freeze when swapping raid groups (40 updates → only changed frames)
-- 🔧 Auras not refreshing on frame swap (now forces `update_aura = true`)
+- 🔧 Rogue combo point tracking (PLAYER_COMBO_POINTS was Druid-only)
+- 🔧 Kidney Shot/Rupture duration (now always uses GetDuration() for CP-abilities)
+- 🔧 Nameplate castbar stuttering (throttle only affects scanner, not updates)
+
+**Changed:**
+- 🔧 Abbreviate Numbers: 1 Decimal mode always rounds DOWN (4180 → 4.1k)
+- 🔧 Nameplate castbar: counts down instead of up
 
 ### 7.2.0 (January 24, 2026)
 
@@ -514,5 +520,5 @@ Same as original pfUI: GNU General Public License v3.0
 
 ---
 
-*Last Updated: January 25, 2026*
-*Version: 7.3.0-experimental*
+*Last Updated: January 26, 2026*
+*Version: 7.4.0-experimental*

@@ -225,6 +225,7 @@ function pfUI:LoadConfig()
   pfUI:UpdateConfig("unitframes", nil,           "combowidth",       "6")
   pfUI:UpdateConfig("unitframes", nil,           "comboheight",      "6")
   pfUI:UpdateConfig("unitframes", nil,           "abbrevnum",        "1")
+  pfUI:UpdateConfig("unitframes", nil,           "castbardecimals",  "2")
   pfUI:UpdateConfig("unitframes", nil,           "abbrevname",       "1")
 
   -- Nampower Settings
