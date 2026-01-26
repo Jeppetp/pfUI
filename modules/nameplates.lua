@@ -572,6 +572,32 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
         if CastEvents[casterGUID] then
           wipe(CastEvents[casterGUID])
         end
+        
+        -- Immediately hide castbar on CAST/FAIL (don't wait for OnUpdate)
+        local plate = guidRegistry[casterGUID]
+        
+        -- Fallback: If guidRegistry empty (after /reload), check if caster is target
+        if not plate then
+          local _, targetGuid = UnitExists("target")
+          if targetGuid and targetGuid == casterGUID then
+            -- Find target plate by alpha and register it
+            for registeredPlate in pairs(registry) do
+              if registeredPlate:IsVisible() and registeredPlate:GetAlpha() >= 0.99 then
+                -- Register this plate for future lookups
+                guidRegistry[casterGUID] = registeredPlate
+                if registeredPlate.nameplate then
+                  registeredPlate.nameplate.cachedGuid = casterGUID
+                end
+                plate = registeredPlate
+                break
+              end
+            end
+          end
+        end
+        
+        if plate and plate.nameplate and plate.nameplate.castbar then
+          plate.nameplate.castbar:Hide()
+        end
       end
 
       -- Flag plate for castbar update via GUID registry (O(1) lookup)
@@ -1602,6 +1628,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
         end
         
         if not cast and not channel then
+          -- No cast data = hide castbar (fixes stuck castbar on FAIL for non-target plates)
           nameplate.castbar:Hide()
         else
           local effect = cast or channel
