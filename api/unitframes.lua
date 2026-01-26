@@ -748,7 +748,17 @@ function pfUI.uf:UpdateConfig()
       f.buffs[i].stacks:SetShadowOffset(0.8, -0.8)
       f.buffs[i].stacks:SetTextColor(1,1,.5)
 
-      f.buffs[i].cd = f.buffs[i].cd or CreateFrame(COOLDOWN_FRAME_TYPE, f.buffs[i]:GetName() .. "Cooldown", f.buffs[i], "CooldownFrameTemplate")
+      -- Create CD frame if it doesn't exist
+      if not f.buffs[i].cd then
+        f.buffs[i].cd = CreateFrame(COOLDOWN_FRAME_TYPE, f.buffs[i]:GetName() .. "Cooldown", f.buffs[i], "CooldownFrameTemplate")
+      end
+      
+      -- Always update CD properties (in case size changed)
+      local cdScale = f.config.buffsize / 32
+      f.buffs[i].cd:ClearAllPoints()
+      f.buffs[i].cd:SetScale(cdScale)
+      f.buffs[i].cd:SetAllPoints(f.buffs[i])
+      f.buffs[i].cd:SetFrameLevel(14)
       f.buffs[i].cd.pfCooldownType = "ALL"
       f.buffs[i].cd.pfCooldownStyleText = cooldown_text
       f.buffs[i].cd.pfCooldownStyleAnimation = cooldown_anim
@@ -829,7 +839,18 @@ function pfUI.uf:UpdateConfig()
       f.debuffs[i].stacks:SetShadowColor(0, 0, 0)
       f.debuffs[i].stacks:SetShadowOffset(0.8, -0.8)
       f.debuffs[i].stacks:SetTextColor(1,1,.5)
-      f.debuffs[i].cd = f.debuffs[i].cd or CreateFrame(COOLDOWN_FRAME_TYPE, f.debuffs[i]:GetName() .. "Cooldown", f.debuffs[i], "CooldownFrameTemplate")
+      
+      -- Create CD frame if it doesn't exist
+      if not f.debuffs[i].cd then
+        f.debuffs[i].cd = CreateFrame(COOLDOWN_FRAME_TYPE, f.debuffs[i]:GetName() .. "Cooldown", f.debuffs[i], "CooldownFrameTemplate")
+      end
+      
+      -- Always update CD properties (in case size changed)
+      local cdScale = f.config.debuffsize / 32
+      f.debuffs[i].cd:ClearAllPoints()
+      f.debuffs[i].cd:SetScale(cdScale)
+      f.debuffs[i].cd:SetAllPoints(f.debuffs[i])
+      f.debuffs[i].cd:SetFrameLevel(14)
       f.debuffs[i].cd.pfCooldownType = "ALL"
       f.debuffs[i].cd.pfCooldownStyleText = cooldown_text
       f.debuffs[i].cd.pfCooldownStyleAnimation = cooldown_anim
@@ -1121,11 +1142,21 @@ function pfUI.uf.OnUpdate()
   end
 
   -- trigger eventless actions (online/offline/range)
-  if not this.lastTick then this.lastTick = GetTime() + (this.tick or .2) end
-  if this.lastTick and this.lastTick < GetTime() then
+  -- Validate tick value - it should be an interval (e.g. 0.5), not a timestamp
+  local tickInterval = this.tick
+  if tickInterval and tickInterval > 10 then
+    tickInterval = nil
+  end
+  -- Reset lastTick if it's invalid (much larger than now)
+  local now = GetTime()
+  if this.lastTick and this.lastTick > now + 10 then
+    this.lastTick = nil
+  end
+  if not this.lastTick then this.lastTick = now + (tickInterval or .5) end
+  if this.lastTick and this.lastTick < now then
     local unitstr = this.label .. this.id
 
-    this.lastTick = GetTime() + (this.tick or .2)
+    this.lastTick = now + (tickInterval or .5)
 
     -- target target has a huge delay, make sure to not tick during range checks
     -- by waiting for a stable name over three ticks otherwise aborting the update.
