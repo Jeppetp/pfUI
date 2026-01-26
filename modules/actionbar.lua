@@ -668,7 +668,10 @@ pfUI:RegisterModule("actionbar", "vanilla", function ()
       start, duration, enable = GetActionCooldown(button.id)
     end
 
-    CooldownFrame_SetTimer(button.cd, start, duration, enable)
+    -- Nil-protect: GetActionCooldown can return nil during macro parsing/indexing
+    if start and duration then
+      CooldownFrame_SetTimer(button.cd, start, duration, enable or 1)
+    end
   end
 
   local _, active
