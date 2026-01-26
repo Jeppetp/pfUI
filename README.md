@@ -96,6 +96,61 @@ Prevents memory leaks when mobs die or go out of range.
 
 ---
 
+## 🎯 What's New in Version 7.3.0 (January 25, 2026)
+
+### ⚡ O(1) Performance Optimizations for Unitframes
+
+**Complete rewrite of health/mana lookups using Nampower's `GetUnitField` API:**
+
+The unitframes now use direct memory access via `GetUnitField(guid, "health")` instead of the slower `UnitHealth()` API calls. This provides significant performance improvements especially in raids.
+
+**Key Changes:**
+
+| Component | Before (7.2.0) | After (7.3.0) |
+|-----------|----------------|---------------|
+| HealPredict Health | `UnitHealth()` API calls | `GetUnitField(guid, "health")` O(1) |
+| Health Bar Colors | 4x redundant API calls per update | Uses cached `hp_orig`/`hpmax_orig` values |
+| GetColor Function | `UnitHealth()` API calls | `GetUnitField(guid, "health")` O(1) |
+
+**Fallback Support:**
+- Automatic fallback to `UnitHealth()` when Nampower not available
+- Automatic fallback for units >180 yards (out of Nampower range)
+- Automatic fallback when GUID unavailable
+
+### 🚀 Smart Roster Updates (No More Freeze!)
+
+**GUID-based tracking eliminates screen freezes when swapping raid groups:**
+
+Previously, any raid roster change would trigger a full update of ALL 40 raid frames, causing noticeable freezes. Now, only frames where the actual player changed get updated.
+
+**How it works:**
+```lua
+-- OLD: RAID_ROSTER_UPDATE → ALL 40 frames update_full = true → FREEZE
+-- NEW: RAID_ROSTER_UPDATE → Check GUID per frame → Only changed frames update
+```
+
+| Scenario | Before (7.2.0) | After (7.3.0) |
+|----------|----------------|---------------|
+| Swap 2 players | 40 frame updates | 2 frame updates |
+| Player joins | 40 frame updates | 1 frame update |
+| Player leaves | 40 frame updates | 1 frame update |
+| No changes | 40 frame updates | 0 frame updates |
+
+**Technical Implementation:**
+- `pfUI.uf.guidTracker` tracks GUID per frame
+- On roster change, compares old GUID vs new GUID
+- Only sets `update_full = true` if GUID actually changed
+- Also forces `update_aura = true` to refresh buffs/debuffs
+
+### 🔧 libpredict.lua Optimizations
+
+**Eliminated redundant `UnitName()` calls:**
+- `UnitGetIncomingHeals()`: Removed double `UnitName()` call
+- `UnitHasIncomingResurrection()`: Removed double `UnitName()` call  
+- `UNIT_HEALTH` event handler: Reuses cached name variable
+
+---
+
 ## 🎯 What's New in Version 7.2.0 (January 24, 2026)
 
 ### 🐱 Druid Secondary Mana Bar Overhaul
