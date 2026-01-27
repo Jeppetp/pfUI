@@ -1,6 +1,6 @@
 # pfUI - Turtle WoW Enhanced Edition (Experiment Branch)
 
-[![Version](https://img.shields.io/badge/version-7.4.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
+[![Version](https://img.shields.io/badge/version-7.4.1--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
 [![Turtle WoW](https://img.shields.io/badge/Turtle%20WoW-1.18.0-brightgreen.svg)](https://turtlecraft.gg/)
 [![SuperWoW](https://img.shields.io/badge/SuperWoW-REQUIRED-purple.svg)](https://github.com/balakethelock/SuperWoW)
 [![Nampower](https://img.shields.io/badge/Nampower-REQUIRED-yellow.svg)](https://gitea.com/avitasia/nampower)
@@ -34,6 +34,37 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 - ✅ You want a stable, battle-tested build
 - ✅ You don't have Nampower
 - ✅ You prefer reliability over bleeding-edge features
+
+---
+
+## 🎯 What's New in Version 7.4.1 (January 27, 2026)
+
+### 🎯 Nameplate Debuff Timer Improvements
+
+- ✅ **New Option: Enable Debuff Timers** - Toggle for debuff timer display on nameplates
+  - Moved from hidden location (Appearance → Cooldown → "Display Debuff Durations") to Nameplates → Debuffs
+  - All timer-related options are now grouped together for better discoverability
+- ✅ **New Option: Show Timer Text** - Toggle the countdown text (e.g., "12s") on debuff icons
+  - Previously always shown, now configurable
+- ✅ **Show Timer Animation** - Existing pie-chart animation option, now properly grouped with other timer options
+
+### 🖼️ Unitframe Timer Config Fix (unitframes.lua)
+
+- ✅ **Live Config Updates** - "Show Timer Animation" and "Show Timer Text" now update immediately
+  - Previously: Changes only applied after buffs/debuffs were refreshed
+  - Now: Toggling the option instantly shows/hides the animation and text on existing buffs/debuffs
+
+### 🔧 Slot Shifting Fix Attempt (libdebuff.lua)
+
+- ✅ **DEBUFF_REMOVED now uses slotData.spellName** - Previously used spellName from scan, which could be wrong after slot shifting
+  - When debuffs shift slots (e.g., slot 3 removed, slots 4+ shift down), the scan might read a different spell
+  - Now uses `removedSpellName = slotData.spellName` from stored slot data for consistency
+- ✅ **Cleanup empty spell tables** - After removing a caster from allAuraCasts, checks if no other casters remain and removes the empty spell table
+- ✅ **Combo Point Inference in DEBUFF_ADDED** - If casterGuid is unknown for combo point abilities (Rip, Rupture, Kidney Shot), and stored combo points > 0, assigns to player
+- ✅ **Defensive casterGuid validation** - Checks for empty string and "0x0000000000000000" before looking up timer data
+- ✅ **Invalid timer detection** - Warns when remaining > duration (impossible state)
+- ✅ **ValidateSlotConsistency function** - Debug function to verify allSlots and allAuraCasts consistency after shifting
+- ✅ **Enhanced debug logging** - All debug messages now include target= for easier filtering
 
 ---
 
@@ -575,5 +606,5 @@ Same as original pfUI: GNU General Public License v3.0
 
 ---
 
-*Last Updated: January 26, 2026*
-*Version: 7.4.0-experimental*
+*Last Updated: January 27, 2026*
+*Version: 7.4.1-experimental*

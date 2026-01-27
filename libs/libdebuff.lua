@@ -174,6 +174,9 @@ end
 local function ShiftSlotsDown(guid, removedSlot)
   if debugStats.enabled then
     debugStats.shift_down = debugStats.shift_down + 1
+    if IsCurrentTarget(guid) then
+      DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[SHIFT DOWN]|r target=%s starting at slot %d", DebugGuid(guid), removedSlot))
+    end
   end
   
   -- Shift ownSlots (only our debuffs)
@@ -212,10 +215,48 @@ local function ShiftSlotsDown(guid, removedSlot)
   end
 end
 
+-- Validate consistency between allSlots and allAuraCasts after shifting
+local function ValidateSlotConsistency(guid)
+  if not debugStats.enabled or not IsCurrentTarget(guid) then return end
+  
+  local inconsistencies = 0
+  
+  if allSlots[guid] then
+    for slot, slotData in pairs(allSlots[guid]) do
+      local spellName = slotData.spellName
+      local casterGuid = slotData.casterGuid
+      
+      -- Check for invalid/missing casterGuid
+      if not casterGuid or casterGuid == "" or casterGuid == "0x0000000000000000" then
+        inconsistencies = inconsistencies + 1
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[INCONSISTENCY]|r target=%s slot=%d %s has INVALID casterGuid=%s", 
+          DebugGuid(guid), slot, spellName, tostring(casterGuid)))
+      -- Check if timer data exists for non-our debuffs with valid casterGuid
+      elseif not slotData.isOurs then
+        if not allAuraCasts[guid] or not allAuraCasts[guid][spellName] or not allAuraCasts[guid][spellName][casterGuid] then
+          inconsistencies = inconsistencies + 1
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[INCONSISTENCY]|r target=%s slot=%d %s caster=%s has no timer data in allAuraCasts", 
+            DebugGuid(guid), slot, spellName, DebugGuid(casterGuid)))
+        end
+      end
+    end
+  end
+  
+  if inconsistencies > 0 then
+    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[VALIDATION FAILED]|r target=%s: %d slot inconsistencies found", 
+      DebugGuid(guid), inconsistencies))
+  else
+    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[VALIDATION OK]|r target=%s: All slots consistent", DebugGuid(guid)))
+  end
+end
+
 -- Shift all slots up when a new one is added
 local function ShiftSlotsUp(guid, newSlot)
   if debugStats.enabled then
     debugStats.shift_up = debugStats.shift_up + 1
+    if IsCurrentTarget(guid) then
+      DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[SHIFT UP]|r target=%s inserting at slot %d", DebugGuid(guid), newSlot))
+    end
   end
   
   -- Shift ownSlots (only our debuffs)
@@ -289,7 +330,7 @@ local function InitializeTargetSlots(guid)
   allSlots[guid] = {}
   
   if debugStats.enabled then
-    DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[INITIAL SCAN]|r Scanning target GUID=%s", GetDebugTimestamp(), DebugGuid(guid)))
+    DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[INITIAL SCAN]|r Scanning target=%s", GetDebugTimestamp(), DebugGuid(guid)))
   end
   
   local myGuid = GetPlayerGUID()
@@ -832,8 +873,14 @@ function libdebuff:UnitDebuff(unit, id)
         
         if shouldLog then
           lastUnitDebuffLog[logKey] = {time = now, caster = slotData.casterGuid}
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[UNITDEBUFF READ]|r slot=%d %s isOurs=%s caster=%s", 
-            GetDebugTimestamp(), id, spellName, tostring(isOurs), DebugGuid(slotData.casterGuid)))
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[UNITDEBUFF READ]|r slot=%d %s target=%s caster=%s isOurs=%s", 
+            GetDebugTimestamp(), id, spellName, DebugGuid(guid), DebugGuid(slotData.casterGuid), tostring(isOurs)))
+          
+          -- Show timer values too (only when throttle allows)
+          if duration and duration > 0 then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[TIMER]|r slot=%d %s duration=%.1fs timeleft=%.1fs", 
+              GetDebugTimestamp(), id, spellName, duration, timeleft))
+          end
         end
       end
       
@@ -858,19 +905,28 @@ function libdebuff:UnitDebuff(unit, id)
           -- This slot is from another player - show their timer if available
           local otherCasterGuid = slotData.casterGuid
           
-          if otherCasterGuid and allAuraCasts[guid] and allAuraCasts[guid][spellName] and allAuraCasts[guid][spellName][otherCasterGuid] then
-            local data = allAuraCasts[guid][spellName][otherCasterGuid]
-            local remaining = (data.startTime + data.duration) - GetTime()
-            -- Only show timer if duration is known (not 0)
-            if remaining > 0 and data.duration > 0 then
-              duration = data.duration
-              timeleft = remaining
-              caster = "other"
-              rank = data.rank
+          -- DEFENSIVE CHECK: Only show timer if casterGuid is valid
+          if otherCasterGuid and otherCasterGuid ~= "" and otherCasterGuid ~= "0x0000000000000000" then
+            if allAuraCasts[guid] and allAuraCasts[guid][spellName] and allAuraCasts[guid][spellName][otherCasterGuid] then
+              local data = allAuraCasts[guid][spellName][otherCasterGuid]
+              local remaining = (data.startTime + data.duration) - GetTime()
+              -- Only show timer if duration is known (not 0) and remaining time is valid
+              if remaining > 0 and data.duration > 0 and remaining <= data.duration then
+                duration = data.duration
+                timeleft = remaining
+                caster = "other"
+                rank = data.rank
+              elseif debugStats.enabled and shouldLog and remaining > data.duration then
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[INVALID TIMER]|r %s remaining=%.1f > duration=%.1f", 
+                  spellName, remaining, data.duration))
+              end
+            elseif debugStats.enabled and shouldLog then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[CASTER NOT IN ALLAURACASTS]|r %s caster=%s", 
+                spellName, DebugGuid(otherCasterGuid)))
             end
           elseif debugStats.enabled and shouldLog then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[CASTER NOT IN ALLAURACASTS]|r %s caster=%s", 
-              spellName, DebugGuid(otherCasterGuid)))
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[INVALID CASTERGUID]|r slot=%d %s caster=%s", 
+              id, spellName, DebugGuid(otherCasterGuid)))
           end
         end
       end
@@ -1052,8 +1108,8 @@ if hasNampower then
         allAuraCasts[targetGuid][spellName] = allAuraCasts[targetGuid][spellName] or {}
         
         if debugStats.enabled and IsCurrentTarget(targetGuid) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[AURA_CAST STORE]|r %s caster=%s isOurs=%s", 
-            GetDebugTimestamp(), spellName, DebugGuid(casterGuid), tostring(isOurs)))
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[AURA_CAST STORE]|r %s target=%s caster=%s isOurs=%s duration=%.1fs", 
+            GetDebugTimestamp(), spellName, DebugGuid(targetGuid), DebugGuid(casterGuid), tostring(isOurs), duration))
         end
         
         -- Check if this is a self-overwrite spell (clears all OTHER casters)
@@ -1087,8 +1143,8 @@ if hasNampower then
                 allSlots[targetGuid][slot].isOurs = isOurs
                 
                 if debugStats.enabled then
-                  DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[ALLSLOTS OVERWRITE]|r slot=%d updated to caster=%s isOurs=%s", 
-                    slot, DebugGuid(casterGuid), tostring(isOurs)))
+                  DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[ALLSLOTS OVERWRITE]|r target=%s slot=%d updated to caster=%s isOurs=%s", 
+                    DebugGuid(targetGuid), slot, DebugGuid(casterGuid), tostring(isOurs)))
                 end
                 break
               end
@@ -1274,11 +1330,6 @@ if hasNampower then
       local spellName = SpellInfo and SpellInfo(spellId)
       if not spellName then return end
       
-      if debugStats.enabled and IsCurrentTarget(guid) then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[DEBUFF_ADDED]|r slot=%d %s stacks=%d guid=%s", 
-          GetDebugTimestamp(), slot, spellName, stacks, DebugGuid(guid)))
-      end
-      
       -- Skip if unit is dead
       if UnitIsDead and UnitIsDead(guid) then return end
       
@@ -1322,6 +1373,31 @@ if hasNampower then
         end
       end
       
+      -- Additional inference for combopoint abilities
+      if not casterGuid and combopointAbilities[spellName] then
+        local storedCPs = GetStoredComboPoints()
+        if storedCPs > 0 then
+          casterGuid = myGuid
+          isOurs = true
+          if debugStats.enabled and IsCurrentTarget(guid) then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[COMBO INFERENCE]|r %s assigned to us (CP=%d)", 
+              spellName, storedCPs))
+          end
+        end
+      end
+      
+      -- Debug: Show DEBUFF_ADDED with target and caster
+      if debugStats.enabled and IsCurrentTarget(guid) then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[DEBUFF_ADDED]|r slot=%d %s target=%s caster=%s stacks=%d", 
+          GetDebugTimestamp(), slot, spellName, DebugGuid(guid), DebugGuid(casterGuid), stacks))
+      end
+      
+      -- Warn if casterGuid remains unknown
+      if not casterGuid and debugStats.enabled and IsCurrentTarget(guid) then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[UNKNOWN CASTER]|r slot=%d %s - no timer available", 
+          slot, spellName))
+      end
+      
       if debugStats.enabled then
         if isOurs then
           debugStats.debuff_added_ours = debugStats.debuff_added_ours + 1
@@ -1353,8 +1429,8 @@ if hasNampower then
       }
       
       if debugStats.enabled and IsCurrentTarget(guid) then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[ALLSLOTS SET]|r slot=%d %s caster=%s isOurs=%s", 
-          slot, spellName, DebugGuid(casterGuid), tostring(isOurs)))
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[ALLSLOTS SET]|r target=%s slot=%d %s caster=%s isOurs=%s", 
+          DebugGuid(guid), slot, spellName, DebugGuid(casterGuid), tostring(isOurs)))
       end
       
       -- Add to ownSlots if ours
@@ -1402,24 +1478,41 @@ if hasNampower then
       if allSlots[guid] and allSlots[guid][slot] then
         local slotData = allSlots[guid][slot]
         local removedCasterGuid = slotData.casterGuid
+        local removedSpellName = slotData.spellName  -- Use slotData for consistency
         
         if debugStats.enabled and IsCurrentTarget(guid) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[DEBUFF_REMOVED]|r slot=%d %s caster=%s", 
-            GetDebugTimestamp(), slot, spellName, DebugGuid(removedCasterGuid)))
+          -- Show both names if they differ
+          if removedSpellName ~= spellName then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[DEBUFF_REMOVED]|r slot=%d %s(scan=%s) target=%s caster=%s |cffff0000MISMATCH!|r", 
+              GetDebugTimestamp(), slot, removedSpellName, spellName, DebugGuid(guid), DebugGuid(removedCasterGuid)))
+          else
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[DEBUFF_REMOVED]|r slot=%d %s target=%s caster=%s", 
+              GetDebugTimestamp(), slot, spellName, DebugGuid(guid), DebugGuid(removedCasterGuid)))
+          end
         end
         
-        -- Also remove from allAuraCasts
-        if removedCasterGuid and allAuraCasts[guid] and allAuraCasts[guid][spellName] then
-          if allAuraCasts[guid][spellName][removedCasterGuid] then
-            allAuraCasts[guid][spellName][removedCasterGuid] = nil
+        -- Also remove from allAuraCasts - use removedSpellName from slotData!
+        if removedCasterGuid and removedCasterGuid ~= "" and allAuraCasts[guid] and allAuraCasts[guid][removedSpellName] then
+          if allAuraCasts[guid][removedSpellName][removedCasterGuid] then
+            allAuraCasts[guid][removedSpellName][removedCasterGuid] = nil
             
             if debugStats.enabled and IsCurrentTarget(guid) then
               DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[AURACAST CLEARED]|r Removed %s for caster %s from allAuraCasts", 
-                spellName, DebugGuid(removedCasterGuid)))
+                removedSpellName, DebugGuid(removedCasterGuid)))
+            end
+            
+            -- Cleanup: If no other casters remain, remove spell table
+            local hasOtherCasters = false
+            for _ in pairs(allAuraCasts[guid][removedSpellName]) do
+              hasOtherCasters = true
+              break
+            end
+            if not hasOtherCasters then
+              allAuraCasts[guid][removedSpellName] = nil
             end
           elseif debugStats.enabled and IsCurrentTarget(guid) then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[AURACAST MISSING]|r %s caster %s not found in allAuraCasts", 
-              spellName, DebugGuid(removedCasterGuid)))
+              removedSpellName, DebugGuid(removedCasterGuid)))
           end
         end
         
@@ -1439,6 +1532,7 @@ if hasNampower then
       
       -- Cleanup
       CleanupOrphanedDebuffs(guid)
+      ValidateSlotConsistency(guid)
       
     elseif event == "PLAYER_TARGET_CHANGED" then
       -- Initialize slots when targeting a new unit

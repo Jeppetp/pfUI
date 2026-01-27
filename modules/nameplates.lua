@@ -70,7 +70,6 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   local parentcount = 0
   local platecount = 0
   local registry = {}
-  local debuffdurations = C.appearance.cd.debuffs == "1" and true or nil
 
   -- ============================================================================
   -- OPTIMIZATION: GUID-based registries for O(1) lookups (from ShaguPlatesX)
@@ -366,8 +365,8 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     plate.debuffs[index].stacks:SetJustifyV("BOTTOM")
     plate.debuffs[index].stacks:SetTextColor(1,1,0)
 
-    -- Read config values for cooldown display (like unitframes does)
-    local cooldown_text = debuffdurations and 1 or 0
+    -- Read config values for cooldown display
+    local cooldown_text = tonumber(C.nameplates.debufftext) or 1
     local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
 
     if pfUI.client <= 11200 then
@@ -427,7 +426,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     
     -- Update cooldown display settings
     if nameplate.debuffs[i].cd then
-      local cooldown_text = debuffdurations and 1 or 0
+      local cooldown_text = tonumber(C.nameplates.debufftext) or 1
       local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
       nameplate.debuffs[i].cd.pfCooldownStyleText = cooldown_text
       nameplate.debuffs[i].cd.pfCooldownStyleAnimation = cooldown_anim
@@ -512,7 +511,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
         plate.nameplate.auraUpdate = true
 
         -- Track debuff start times for duration display
-        if debuffdurations then
+        if C.nameplates.debufftimers == "1" then
           if not debuffCache[guid] then debuffCache[guid] = {} end
           wipe(debuffSeen)
 
@@ -1231,15 +1230,14 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
             plate.debuffs[index].stacks:Hide()
           end
 
-          if duration and timeleft and debuffdurations then
-            -- Ensure cooldown flags are set
+          if duration and timeleft and C.nameplates.debufftimers == "1" then
+            -- Read config values for cooldown display
             local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
-            if plate.debuffs[index].cd.pfCooldownStyleText == nil then
-              plate.debuffs[index].cd.pfCooldownStyleText = 1
-            end
-            if plate.debuffs[index].cd.pfCooldownStyleAnimation == nil then
-              plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
-            end
+            local cooldown_text = tonumber(C.nameplates.debufftext) or 1
+            
+            -- Ensure cooldown flags are set
+            plate.debuffs[index].cd.pfCooldownStyleText = cooldown_text
+            plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
             plate.debuffs[index].cd.pfCooldownType = "ALL"
             
             -- Set alpha based on animation config (0 = hide animation, 1 = show)
@@ -1694,9 +1692,6 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   nameplates.UpdateConfig = function()
     -- Refresh config cache for all cfg.* values
     CacheConfig()
-    
-    -- Update debuffdurations from appearance config
-    debuffdurations = C.appearance.cd.debuffs == "1" and true or nil
     
     -- update debuff filters
     DebuffFilterPopulate()
