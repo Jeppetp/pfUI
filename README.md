@@ -60,7 +60,6 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
   - When debuffs shift slots (e.g., slot 3 removed, slots 4+ shift down), the scan might read a different spell
   - Now uses `removedSpellName = slotData.spellName` from stored slot data for consistency
 - ✅ **Cleanup empty spell tables** - After removing a caster from allAuraCasts, checks if no other casters remain and removes the empty spell table
-- ✅ **Combo Point Inference in DEBUFF_ADDED** - If casterGuid is unknown for combo point abilities (Rip, Rupture, Kidney Shot), and stored combo points > 0, assigns to player
 - ✅ **Defensive casterGuid validation** - Checks for empty string and "0x0000000000000000" before looking up timer data
 - ✅ **Invalid timer detection** - Warns when remaining > duration (impossible state)
 - ✅ **ValidateSlotConsistency function** - Debug function to verify allSlots and allAuraCasts consistency after shifting
