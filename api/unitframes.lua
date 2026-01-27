@@ -3197,11 +3197,3 @@ _G.SlashCmdList["PFUISTATS"] = function(msg)
     end
   end
 end
-
--- Startup messages
-DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfUI|r Nampower Integration loaded! Type |cffffcc00/pfuistats|r to toggle stats")
-if GetUnitField then
-  DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfUI|r |cff00ff00Nampower detected!|r Using direct memory access for health/mana")
-else
-  DEFAULT_CHAT_FRAME:AddMessage("|cff33ffccpfUI|r |cffff8800Nampower not found|r - using standard API")
-end
