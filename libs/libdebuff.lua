@@ -27,7 +27,47 @@ local _, class = UnitClass("player")
 local lastspell
 
 -- Nampower Support
-local hasNampower = GetNampowerVersion ~= nil
+local hasNampower = false
+
+-- Set hasNampower immediately for functionality
+if GetNampowerVersion then
+  local major, minor, patch = GetNampowerVersion()
+  if major > 2 or (major == 2 and minor >= 26) then
+    hasNampower = true
+  end
+end
+
+-- Delayed Nampower version check (5 seconds after PLAYER_ENTERING_WORLD)
+local nampowerCheckFrame = CreateFrame("Frame")
+local nampowerCheckTimer = 0
+local nampowerCheckDone = false
+
+nampowerCheckFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+nampowerCheckFrame:SetScript("OnEvent", function()
+  nampowerCheckFrame:SetScript("OnUpdate", function()
+    nampowerCheckTimer = nampowerCheckTimer + arg1
+    if nampowerCheckTimer >= 5 and not nampowerCheckDone then
+      nampowerCheckDone = true
+      
+      if GetNampowerVersion then
+        local major, minor, patch = GetNampowerVersion()
+        
+        -- Check for minimum required version: 2.26.0
+        if major > 2 or (major == 2 and minor >= 26) then
+          DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Nampower v" .. major .. "." .. minor .. "." .. patch .. " detected - debuff tracking enabled!")
+        else
+          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Debuff tracking disabled! Please update Nampower to v2.26.0 or higher.|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Current version: " .. major .. "." .. minor .. "." .. patch .. "|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] https://gitea.com/avitasia/nampower/releases/tag/v2.26.0 ")
+        end
+      else
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Nampower not found! Debuff tracking disabled.|r")
+      end
+      
+      nampowerCheckFrame:SetScript("OnUpdate", nil)
+    end
+  end)
+end)
 
 -- ownDebuffs: [targetGUID][spellName] = {startTime, duration, texture, rank, slot}
 pfUI.libdebuff_own = pfUI.libdebuff_own or {}
