@@ -68,8 +68,6 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   local parentcount = 0
   local platecount = 0
   local registry = {}
-  local debuffdurations = C.appearance.cd.debuffs == "1" and true or nil
-
   -- NEW: Cast event cache like Overhead.lua
   local CastEvents = {}
   local _, PlayerGUID = UnitExists("player")
@@ -313,8 +311,9 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     plate.debuffs[index].stacks:SetJustifyV("BOTTOM")
     plate.debuffs[index].stacks:SetTextColor(1,1,0)
 
-    -- Read config for cooldown animation
+    -- Read config for cooldown animation and text
     local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
+    local cooldown_text = tonumber(C.nameplates.debufftext) or 1
 
     if pfUI.client <= 11200 then
       -- Use Model frame with CooldownFrameTemplate for proper pie animation in Vanilla
@@ -326,6 +325,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     end
 
     plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
+    plate.debuffs[index].cd.pfCooldownStyleText = cooldown_text
     plate.debuffs[index].cd.pfCooldownType = "ALL"
   end
 
@@ -1050,8 +1050,11 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
             plate.debuffs[index].stacks:Hide()
           end
 
-          if duration and timeleft and debuffdurations then
+          if duration and timeleft and C.nameplates.debufftimers == "1" then
             local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
+            local cooldown_text = tonumber(C.nameplates.debufftext) or 1
+            plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
+            plate.debuffs[index].cd.pfCooldownStyleText = cooldown_text
             plate.debuffs[index].cd:SetAlpha(cooldown_anim == 1 and 1 or 0)
             plate.debuffs[index].cd:Show()
             CooldownFrame_SetTimer(plate.debuffs[index].cd, GetTime() + timeleft - duration, duration, 1)
