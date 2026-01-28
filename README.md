@@ -37,6 +37,21 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 
 ---
 
+## 🎯 What's New in Version 7.4.2 (January 28, 2026)
+
+### Major Performance Improvements
+- **Much faster debuff tracking** - No more lag in 40-man raids
+- **10x less memory usage** - Runs cleaner over long raid sessions
+- **Instant cleanup** - Dead mobs cleaned up immediately (was: 2-5 minutes)
+
+### Better Debuff Tracking
+- **Multi-player debuffs** - See debuffs from all raid members with accurate timers
+- **Rank protection** - Lower rank spells can't overwrite higher ranks anymore
+- **100% accurate positioning** - Debuff icons always in the correct slot
+- **Better combo points** - Rip, Rupture, Kidney Shot show correct duration
+
+---
+
 ## 🎯 What's New in Version 7.4.1 (January 27, 2026)
 
 ### 🎯 Nameplate Debuff Timer Improvements

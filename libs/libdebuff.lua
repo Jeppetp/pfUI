@@ -529,6 +529,53 @@ local function InitializeTargetSlots(guid)
   end
 end
 
+-- ============================================================================
+-- TARGETED CLEANUP: Cleanup a specific GUID completely
+-- ============================================================================
+local function CleanupUnit(guid)
+  if not guid then return false end
+  
+  local cleaned = false
+  
+  -- Remove from all tracking tables
+  if ownDebuffs[guid] then
+    ownDebuffs[guid] = nil
+    cleaned = true
+  end
+  
+  if ownSlots[guid] then
+    ownSlots[guid] = nil
+    cleaned = true
+  end
+  
+  if allSlots[guid] then
+    allSlots[guid] = nil
+    cleaned = true
+  end
+  
+  if allAuraCasts[guid] then
+    allAuraCasts[guid] = nil
+    cleaned = true
+  end
+  
+  if objectsByGuid[guid] then
+    objectsByGuid[guid] = nil
+    cleaned = true
+  end
+  
+  if pendingCasts[guid] then
+    pendingCasts[guid] = nil
+    cleaned = true
+  end
+  
+  -- Debug output
+  if debugStats.enabled and cleaned and IsCurrentTarget(guid) then
+    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[CLEANUP UNIT]|r Cleaned up all data for GUID %s", DebugGuid(guid)))
+  end
+  
+  return cleaned
+end
+
 -- Cleanup old pending casts (older than 1 second)
 local function CleanupPendingCasts()
   local now = GetTime()
@@ -556,24 +603,45 @@ local lastCastRanks = {}
 -- Speichert Spells die gefailed sind (miss/dodge/parry/etc.) für 1 Sekunde
 local lastFailedSpells = {}
 
--- Cleanup out of range units (every 30s)
+-- ============================================================================
+-- PERIODIC CLEANUP: Check all units every 10s (fallback for missed events)
+-- ============================================================================
 local function CleanupOutOfRangeUnits()
   local now = GetTime()
-  if now - lastRangeCheck < 30 then return end
+  if now - lastRangeCheck < 10 then return end  -- Reduced from 30s to 10s
   lastRangeCheck = now
   
-  for guid in pairs(ownDebuffs) do
+  -- Build set of all GUIDs across all tables
+  local allGuids = {}
+  for guid in pairs(ownDebuffs) do allGuids[guid] = true end
+  for guid in pairs(ownSlots) do allGuids[guid] = true end
+  for guid in pairs(allSlots) do allGuids[guid] = true end
+  for guid in pairs(allAuraCasts) do allGuids[guid] = true end
+  for guid in pairs(objectsByGuid) do allGuids[guid] = true end
+  for guid in pairs(pendingCasts) do allGuids[guid] = true end
+  
+  local cleanedCount = 0
+  
+  -- Check each GUID
+  for guid in pairs(allGuids) do
     local exists = UnitExists and UnitExists(guid)
-    if not exists then
-      ownDebuffs[guid] = nil
-      if ownSlots[guid] then ownSlots[guid] = nil end
-      if allSlots[guid] then allSlots[guid] = nil end
-      if allAuraCasts[guid] then allAuraCasts[guid] = nil end
-      if objectsByGuid[guid] then objectsByGuid[guid] = nil end
+    local isDead = UnitIsDead and UnitIsDead(guid)
+    
+    -- Cleanup if:
+    -- 1. Unit doesn't exist anymore (despawned/out of range)
+    -- 2. OR unit is dead (fallback in case UNIT_HEALTH event was missed)
+    if not exists or isDead then
+      if CleanupUnit(guid) then
+        cleanedCount = cleanedCount + 1
+      end
     end
   end
   
-  -- Cleanup old lastCastRanks entries (older than 3 seconds - only needed for 2s)
+  if debugStats.enabled and cleanedCount > 0 then
+    DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[PERIODIC CLEANUP]|r Cleaned %d units (dead or out of range)", cleanedCount))
+  end
+  
+  -- Cleanup old lastCastRanks entries (older than 3 seconds)
   for spell, data in pairs(lastCastRanks) do
     if now - data.time > 3 then
       lastCastRanks[spell] = nil
@@ -584,6 +652,24 @@ local function CleanupOutOfRangeUnits()
   for spell, data in pairs(lastFailedSpells) do
     if now - data.time > 2 then
       lastFailedSpells[spell] = nil
+    end
+  end
+  
+  -- Cleanup old pendingCasts (integrated here for efficiency)
+  for guid, spells in pairs(pendingCasts) do
+    for spell, data in pairs(spells) do
+      if now - data.time > 1 then
+        pendingCasts[guid][spell] = nil
+      end
+    end
+    -- Clean empty guid entries
+    local isEmpty = true
+    for _ in pairs(pendingCasts[guid]) do
+      isEmpty = false
+      break
+    end
+    if isEmpty then
+      pendingCasts[guid] = nil
     end
   end
 end
@@ -1281,6 +1367,7 @@ if hasNampower then
   frame:RegisterEvent("DEBUFF_ADDED_OTHER")
   frame:RegisterEvent("DEBUFF_REMOVED_OTHER")
   frame:RegisterEvent("PLAYER_TARGET_CHANGED")
+  frame:RegisterEvent("UNIT_HEALTH")  -- For instant cleanup when units die
   
   frame:SetScript("OnEvent", function()
     if event == "PLAYER_LOGOUT" then
@@ -1304,6 +1391,15 @@ if hasNampower then
         lastSpentTime = GetTime()
       end
       currentComboPoints = current
+      
+    elseif event == "UNIT_HEALTH" then
+      -- Instant cleanup when unit dies (proactive cleanup)
+      local guid = arg1
+      
+      if guid and UnitIsDead and UnitIsDead(guid) then
+        -- Unit just died - do targeted cleanup for this GUID
+        CleanupUnit(guid)
+      end
       
     elseif event == "AURA_CAST_ON_SELF" or event == "AURA_CAST_ON_OTHER" then
       local spellId = arg1
@@ -1356,7 +1452,7 @@ if hasNampower then
       if not isOurs and combopointAbilities[spellName] then
         duration = 0
         
-        if debugStats.enabled then
+        if debugStats.enabled and IsCurrentTarget(targetGuid) then
           DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[CP-ABILITY OTHER]|r %s duration forced to 0 (unknown)", spellName))
         end
       end
@@ -1408,7 +1504,7 @@ if hasNampower then
               if otherCaster ~= casterGuid then
                 table.insert(oldCasters, otherCaster)
                 
-                if debugStats.enabled then
+                if debugStats.enabled and IsCurrentTarget(targetGuid) then
                   DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[SELF-OVERWRITE CLEAR]|r Clearing caster %s (new caster is %s)", 
                     DebugGuid(otherCaster), DebugGuid(casterGuid)))
                 end
@@ -1426,7 +1522,7 @@ if hasNampower then
                   allSlots[targetGuid][slot].casterGuid = casterGuid
                   allSlots[targetGuid][slot].isOurs = isOurs
                   
-                  if debugStats.enabled then
+                  if debugStats.enabled and IsCurrentTarget(targetGuid) then
                     DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[ALLSLOTS OVERWRITE]|r target=%s slot=%d updated to caster=%s isOurs=%s", 
                       DebugGuid(targetGuid), slot, DebugGuid(casterGuid), tostring(isOurs)))
                   end
@@ -1445,12 +1541,12 @@ if hasNampower then
                 ownSlots[targetGuid][oldSlot] = nil
               end
               
-              if debugStats.enabled then
+              if debugStats.enabled and IsCurrentTarget(targetGuid) then
                 DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[OWNDBUFFS CLEARED]|r %s removed (not ours anymore)", spellName))
               end
             end
             
-            if debugStats.enabled and table.getn(oldCasters) == 0 then
+            if debugStats.enabled and IsCurrentTarget(targetGuid) and table.getn(oldCasters) == 0 then
               DEFAULT_CHAT_FRAME:AddMessage("|cffff9900[SELF-OVERWRITE SKIP]|r No other casters found to clear")
             end
           end -- end shouldOverwrite
@@ -1498,7 +1594,7 @@ if hasNampower then
         if selfOverwriteDebuffs[spellName] and pfUI and pfUI.uf and pfUI.uf.target then
           pfUI.uf:RefreshUnit(pfUI.uf.target, "aura")
           
-          if debugStats.enabled then
+          if debugStats.enabled and IsCurrentTarget(targetGuid) then
             DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[TARGET REFRESHED]|r RefreshUnit called")
           end
         end
@@ -1507,7 +1603,7 @@ if hasNampower then
         if debuffOverwritePairs[spellName] then
           local otherVariant = debuffOverwritePairs[spellName]
           
-          if debugStats.enabled then
+          if debugStats.enabled and IsCurrentTarget(targetGuid) then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[OVERWRITE CHECK]|r %s -> %s for caster %s", 
               spellName, otherVariant, DebugGuid(casterGuid)))
           end
@@ -1516,11 +1612,11 @@ if hasNampower then
           if allAuraCasts[targetGuid][otherVariant] and allAuraCasts[targetGuid][otherVariant][casterGuid] then
             allAuraCasts[targetGuid][otherVariant][casterGuid] = nil
             
-            if debugStats.enabled then
+            if debugStats.enabled and IsCurrentTarget(targetGuid) then
               DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[OVERWRITE CLEARED]|r Removed %s for caster %s", 
                 otherVariant, DebugGuid(casterGuid)))
             end
-          elseif debugStats.enabled then
+          elseif debugStats.enabled and IsCurrentTarget(targetGuid) then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[OVERWRITE SKIP]|r No %s found for caster %s", 
               otherVariant, DebugGuid(casterGuid)))
           end
@@ -1648,14 +1744,14 @@ if hasNampower then
         
         if timeleft > 0 and castRank > 0 and castRank < existingRank then
           -- Lower rank cannot refresh higher rank!
-          if debugStats.enabled then
+          if debugStats.enabled and IsCurrentTarget(targetGuid) then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[REFRESH BLOCKED OWN]|r %s Rank %d cannot refresh Rank %d", 
               GetDebugTimestamp(), spellName, castRank, existingRank))
           end
         else
           -- OK to refresh (same rank, higher rank, or castRank unknown)
           ownDebuffs[targetGuid][spellName].startTime = GetTime()
-          if debugStats.enabled then
+          if debugStats.enabled and IsCurrentTarget(targetGuid) then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00ff[REFRESH OWN]|r %s Rank %d on %s (duration=%.1fs)", 
               GetDebugTimestamp(), spellName, castRank, DebugGuid(targetGuid), existingData.duration))
           end
@@ -1665,7 +1761,7 @@ if hasNampower then
             local _, currentTargetGuid = UnitExists("target")
             if currentTargetGuid == targetGuid then
               pfUI.uf:RefreshUnit(pfUI.uf.target, "aura")
-              if debugStats.enabled then
+              if debugStats.enabled and IsCurrentTarget(targetGuid) then
                 DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[TARGET FRAME REFRESHED OWN]|r Called pfUI.uf:RefreshUnit for %s", 
                   GetDebugTimestamp(), spellName))
               end
@@ -1687,14 +1783,14 @@ if hasNampower then
         
         if timeleft > 0 and castRank > 0 and castRank < existingRank then
           -- Lower rank cannot refresh higher rank!
-          if debugStats.enabled then
+          if debugStats.enabled and IsCurrentTarget(targetGuid) then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[REFRESH BLOCKED OTHER]|r %s Rank %d cannot refresh Rank %d", 
               GetDebugTimestamp(), spellName, castRank, existingRank))
           end
         else
           -- OK to refresh (same rank, higher rank, or castRank unknown)
           allAuraCasts[targetGuid][spellName][casterGuid].startTime = GetTime()
-          if debugStats.enabled then
+          if debugStats.enabled and IsCurrentTarget(targetGuid) then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00ff[REFRESH OTHER]|r %s Rank %d on %s by %s (duration=%.1fs)", 
               GetDebugTimestamp(), spellName, castRank, DebugGuid(targetGuid), DebugGuid(casterGuid), existingData.duration))
           end
@@ -1704,15 +1800,15 @@ if hasNampower then
             local _, currentTargetGuid = UnitExists("target")
             if currentTargetGuid == targetGuid then
               pfUI.uf:RefreshUnit(pfUI.uf.target, "aura")
-              if debugStats.enabled then
+              if debugStats.enabled and IsCurrentTarget(targetGuid) then
                 DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[TARGET FRAME REFRESHED]|r Called pfUI.uf:RefreshUnit for %s", 
                   GetDebugTimestamp(), spellName))
               end
-            elseif debugStats.enabled then
+            elseif debugStats.enabled and IsCurrentTarget(targetGuid) then
               DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff9900[NOT CURRENT TARGET]|r target=%s current=%s", 
                 GetDebugTimestamp(), DebugGuid(targetGuid), DebugGuid(currentTargetGuid)))
             end
-          elseif debugStats.enabled then
+          elseif debugStats.enabled and IsCurrentTarget(targetGuid) then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[REFRESH SKIP]|r pfUI=%s uf=%s target=%s UnitExists=%s", 
               GetDebugTimestamp(), tostring(pfUI~=nil), tostring(pfUI and pfUI.uf~=nil), tostring(pfUI and pfUI.uf and pfUI.uf.target~=nil), tostring(UnitExists~=nil)))
           end
@@ -1750,8 +1846,11 @@ if hasNampower then
       local spellName = SpellInfo and SpellInfo(spellId)
       if not spellName then return end
       
-      -- Skip if unit is dead
-      if UnitIsDead and UnitIsDead(guid) then return end
+      -- If unit is dead, cleanup and skip processing (defensive fallback)
+      if UnitIsDead and UnitIsDead(guid) then
+        CleanupUnit(guid)
+        return
+      end
       
       -- Get casterGuid from pendingCasts (UNIT_CASTEVENT)
       local casterGuid = nil
@@ -1901,7 +2000,6 @@ if hasNampower then
       
       -- Cleanup orphaned debuffs
       CleanupOrphanedDebuffs(guid)
-      CleanupPendingCasts()
       
       -- Notify nameplates that debuff was added
       if pfUI.nameplates and pfUI.nameplates.OnAuraUpdate then
@@ -1913,8 +2011,11 @@ if hasNampower then
       
       local spellName = SpellInfo and SpellInfo(spellId) or "?"
       
-      -- Skip if unit is dead (cleanup handled separately)
-      if UnitIsDead and UnitIsDead(guid) then return end
+      -- If unit is dead, cleanup and skip processing (defensive fallback)
+      if UnitIsDead and UnitIsDead(guid) then
+        CleanupUnit(guid)
+        return
+      end
       
       -- Check if was ours
       local wasOurs = false
@@ -2299,4 +2400,81 @@ _G.SlashCmdList["SHIFTTEST"] = function(msg)
     DEFAULT_CHAT_FRAME:AddMessage("  /shifttest stats")
     DEFAULT_CHAT_FRAME:AddMessage("  /shifttest slots")
   end
+end
+
+-- Debug command: /memcheck - Show memory usage statistics
+_G.SLASH_MEMCHECK1 = "/memcheck"
+_G.SlashCmdList["MEMCHECK"] = function()
+  local function countTable(t)
+    local count = 0
+    if not t then return 0 end
+    for _ in pairs(t) do count = count + 1 end
+    return count
+  end
+  
+  local function countNestedEntries(t)
+    local total = 0
+    if not t then return 0 end
+    for _, nested in pairs(t) do
+      if type(nested) == "table" then
+        total = total + countTable(nested)
+      end
+    end
+    return total
+  end
+  
+  -- Count active debuffs (ownDebuffs)
+  local totalOwnDebuffs = 0
+  for guid, debuffs in pairs(ownDebuffs) do
+    for spell, data in pairs(debuffs) do
+      local timeleft = (data.startTime + data.duration) - GetTime()
+      if timeleft > 0 then
+        totalOwnDebuffs = totalOwnDebuffs + 1
+      end
+    end
+  end
+  
+  DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff========== LIBDEBUFF MEMORY ==========|r")
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00Primary Tables:|r"))
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("  ownDebuffs: %d GUIDs, %d active debuffs", countTable(ownDebuffs), totalOwnDebuffs))
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("  ownSlots: %d GUIDs, %d tracked slots", countTable(ownSlots), countNestedEntries(ownSlots)))
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("  allSlots: %d GUIDs, %d tracked slots", countTable(allSlots), countNestedEntries(allSlots)))
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("  objectsByGuid: %d GUIDs, %d entries", countTable(objectsByGuid), countNestedEntries(objectsByGuid)))
+  
+  -- Count allAuraCasts (triple-nested)
+  local totalAuraCasts = 0
+  local activeAuraCasts = 0
+  for guid, spells in pairs(allAuraCasts) do
+    for spell, casters in pairs(spells) do
+      for casterGuid, data in pairs(casters) do
+        totalAuraCasts = totalAuraCasts + 1
+        local timeleft = (data.startTime + data.duration) - GetTime()
+        if timeleft > 0 then
+          activeAuraCasts = activeAuraCasts + 1
+        end
+      end
+    end
+  end
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("  allAuraCasts: %d GUIDs, %d casts (%d active)", countTable(allAuraCasts), totalAuraCasts, activeAuraCasts))
+  
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900Support Tables:|r"))
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("  pendingCasts: %d GUIDs, %d pending", countTable(pendingCasts), countNestedEntries(pendingCasts)))
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("  lastCastRanks: %d entries", countTable(lastCastRanks)))
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("  lastFailedSpells: %d entries", countTable(lastFailedSpells)))
+  
+  -- Summary
+  local totalGuids = 0
+  local allGuids = {}
+  for guid in pairs(ownDebuffs) do allGuids[guid] = true end
+  for guid in pairs(ownSlots) do allGuids[guid] = true end
+  for guid in pairs(allSlots) do allGuids[guid] = true end
+  for guid in pairs(allAuraCasts) do allGuids[guid] = true end
+  for guid in pairs(objectsByGuid) do allGuids[guid] = true end
+  for guid in pairs(pendingCasts) do allGuids[guid] = true end
+  for _ in pairs(allGuids) do totalGuids = totalGuids + 1 end
+  
+  DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff========================================|r")
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[TOTAL]|r %d unique GUIDs tracked", totalGuids))
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[ACTIVE]|r %d own debuffs, %d other casts", totalOwnDebuffs, activeAuraCasts))
+  DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff========================================|r")
 end
