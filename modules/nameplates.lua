@@ -440,21 +440,42 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   end
 
   -- create nameplate core
-  local nameplates = CreateFrame("Frame", "pfNameplates", UIParent)
-  nameplates:RegisterEvent("PLAYER_ENTERING_WORLD")
-  nameplates:RegisterEvent("PLAYER_TARGET_CHANGED")
-  nameplates:RegisterEvent("UNIT_COMBO_POINTS")
-  nameplates:RegisterEvent("PLAYER_COMBO_POINTS")
-  nameplates:RegisterEvent("UNIT_AURA")
-  nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+local nameplates = CreateFrame("Frame", "pfNameplates", UIParent)
+nameplates:RegisterEvent("PLAYER_ENTERING_WORLD")
+nameplates:RegisterEvent("PLAYER_TARGET_CHANGED")
+nameplates:RegisterEvent("PLAYER_LOGOUT")
+nameplates:RegisterEvent("UNIT_COMBO_POINTS")
+nameplates:RegisterEvent("PLAYER_COMBO_POINTS")
+nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
   
   -- NEW: Register cast events like Overhead.lua
   if superwow_active then
     nameplates:RegisterEvent("UNIT_CASTEVENT")
   end
 
+  -- Callback from libdebuff when auras change (GUID-based, event-driven)
+  nameplates.OnAuraUpdate = function(self, guid)
+    if not guid then return end
+    
+    -- GUID is actual GUID (0xF13000...) from SuperWoW/Nampower events
+    local plate = guidRegistry[guid]
+    if plate and plate.nameplate then
+      -- Mark nameplate for aura update in next OnUpdate cycle
+      plate.nameplate.auraUpdate = true
+    end
+  end
+
   nameplates:SetScript("OnEvent", function()
-    if event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
+    -- Stop event handling during logout to prevent crash 132
+    if event == "PLAYER_LOGOUT" then
+      nameplates:SetScript("OnEvent", nil)
+      nameplates:SetScript("OnUpdate", nil)
+      if nameplates.mouselook then
+        nameplates.mouselook:SetScript("OnUpdate", nil)
+      end
+      return
+      
+    elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
       if event == "PLAYER_ENTERING_WORLD" then
         _, PlayerGUID = UnitExists("player")
         CacheConfig()
@@ -500,46 +521,6 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
           
           savedHostileState = nil
           savedFriendlyState = nil
-        end
-      end
-
-    elseif event == "UNIT_AURA" then
-      -- SuperWoW: arg1 is the unit GUID - direct O(1) lookup
-      local guid = arg1
-      local plate = guidRegistry[guid]
-      if plate and plate.nameplate then
-        plate.nameplate.auraUpdate = true
-
-        -- Track debuff start times for duration display
-        if C.nameplates.debufftimers == "1" then
-          if not debuffCache[guid] then debuffCache[guid] = {} end
-          wipe(debuffSeen)
-
-          -- Scan current debuffs and track new ones
-          for i = 1, 16 do
-            local texture, stacks, dtype, spellID = UnitDebuff(guid, i)
-            if not texture then break end
-
-            debuffSeen[spellID] = true
-            if not debuffCache[guid][spellID] then
-              -- New debuff - record start time and lookup duration
-              local spellName = SpellInfo(spellID)
-              -- Use dynamic GetDuration for CP-based abilities (Kidney Shot, Rupture, etc.)
-              local duration = libdebuff and libdebuff.GetDuration and libdebuff:GetDuration(spellName, 0)
-              if not duration or duration == 0 then
-                -- Fallback to static lookup
-                duration = L["debuffs"][spellName] and L["debuffs"][spellName][0] or nil
-              end
-              debuffCache[guid][spellID] = { start = GetTime(), duration = duration }
-            end
-          end
-
-          -- Clear expired debuffs from cache
-          for spellID in pairs(debuffCache[guid]) do
-            if not debuffSeen[spellID] then
-              debuffCache[guid][spellID] = nil
-            end
-          end
         end
       end
 
@@ -702,8 +683,12 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   nameplates.combat = CreateFrame("Frame")
   nameplates.combat:RegisterEvent("PLAYER_ENTER_COMBAT")
   nameplates.combat:RegisterEvent("PLAYER_LEAVE_COMBAT")
+  nameplates.combat:RegisterEvent("PLAYER_LOGOUT")
   nameplates.combat:SetScript("OnEvent", function()
-    if event == "PLAYER_ENTER_COMBAT" then
+    if event == "PLAYER_LOGOUT" then
+      nameplates.combat:SetScript("OnEvent", nil)
+      return
+    elseif event == "PLAYER_ENTER_COMBAT" then
       this.inCombat = 1
       if PlayerFrame then PlayerFrame.inCombat = 1 end
     elseif event == "PLAYER_LEAVE_COMBAT" then
