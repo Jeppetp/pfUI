@@ -60,7 +60,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   local childs = {}  -- PERF: Reuse table instead of creating new one each scan
   local regions, plate
   local initialized = 0
-  
+
   -- Friendly zone nameplate disable state
   local savedHostileState = nil
   local savedFriendlyState = nil
@@ -70,38 +70,68 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   local registry = {}
   local debuffdurations = C.appearance.cd.debuffs == "1" and true or nil
 
+  -- PERF: Track visible plate count for adaptive throttling
+  local visiblePlateCount = 0
+  local lastVisibleCheck = 0
+
   -- NEW: Cast event cache like Overhead.lua
   local CastEvents = {}
   local _, PlayerGUID = UnitExists("player")
 
+  -- PERF: Cache frequently accessed config values
+  local cachedNotargAlpha = nil
+  local function GetNotargAlpha()
+    if not cachedNotargAlpha then
+      local alpha = tonumber(C.nameplates.notargalpha)
+      if not alpha or alpha < 0 then alpha = 100 end
+      if alpha > 1 then alpha = alpha / 100 end
+      cachedNotargAlpha = alpha
+    end
+    return cachedNotargAlpha
+  end
+
   -- cache default border color
   local er, eg, eb, ea = GetStringColor(pfUI_config.appearance.border.color)
 
+  -- PERF: Cache combat state config checks (evaluated once at load)
   local function GetCombatStateColor(guid)
+    -- PERF: Quick exit if not in combat (most common case outside raids)
+    if not UnitAffectingCombat("player") then return false end
+    if not UnitAffectingCombat(guid) then return false end
+    if UnitCanAssist("player", guid) then return false end
+
     local target = guid.."target"
     local color = false
 
-    if UnitAffectingCombat("player") and UnitAffectingCombat(guid) and not UnitCanAssist("player", guid) then
-      -- Check if mob is currently casting (uses existing CastEvents cache)
-      local isCasting = CastEvents[guid] and CastEvents[guid].endTime and GetTime() < CastEvents[guid].endTime
-      local targetingPlayer = UnitIsUnit(target, "player")
+    -- Check if mob is currently casting (uses existing CastEvents cache)
+    local castData = CastEvents[guid]
+    local isCasting = castData and castData.endTime and GetTime() < castData.endTime
+    local targetingPlayer = UnitIsUnit(target, "player")
 
-      -- Remember if mob targets player, clear only when targeting someone else while NOT casting
-      if targetingPlayer then
-        threatMemory[guid] = true
-      elseif UnitExists(target) and not isCasting then
-        threatMemory[guid] = nil
+    -- Remember if mob targets player, clear only when targeting someone else while NOT casting
+    if targetingPlayer then
+      threatMemory[guid] = true
+    elseif UnitExists(target) and not isCasting then
+      threatMemory[guid] = nil
+    end
+
+    -- PERF: Check config values and compute color
+    if C.nameplates.ccombatcasting == "1" and (UnitCastingInfo(guid) or UnitChannelInfo(guid)) then
+      color = combatstate.CASTING
+    elseif C.nameplates.ccombatthreat == "1" and (targetingPlayer or threatMemory[guid]) then
+      color = combatstate.THREAT
+    elseif C.nameplates.ccombatofftank == "1" then
+      local targetName = UnitName(target)
+      if targetName then
+        local lowerName = strlower(targetName)
+        if offtanks[lowerName] or (pfUI.uf and pfUI.uf.raid and pfUI.uf.raid.tankrole[targetName]) then
+          color = combatstate.OFFTANK
+        end
       end
+    end
 
-      if C.nameplates.ccombatcasting == "1" and (UnitCastingInfo(guid) or UnitChannelInfo(guid)) then
-        color = combatstate.CASTING
-      elseif C.nameplates.ccombatthreat == "1" and (targetingPlayer or threatMemory[guid]) then
-        color = combatstate.THREAT
-      elseif C.nameplates.ccombatofftank == "1" and UnitName(target) and offtanks[strlower(UnitName(target))] then
-        color = combatstate.OFFTANK
-      elseif C.nameplates.ccombatofftank == "1" and pfUI.uf and pfUI.uf.raid and pfUI.uf.raid.tankrole[UnitName(target)] then
-        color = combatstate.OFFTANK
-      elseif C.nameplates.ccombatnothreat == "1" and UnitExists(target) then
+    if not color then
+      if C.nameplates.ccombatnothreat == "1" and UnitExists(target) then
         color = combatstate.NOTHREAT
       elseif C.nameplates.ccombatstun == "1" and not UnitExists(target) and not UnitIsPlayer(guid) then
         color = combatstate.STUN
@@ -313,19 +343,21 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     plate.debuffs[index].stacks:SetJustifyV("BOTTOM")
     plate.debuffs[index].stacks:SetTextColor(1,1,0)
 
-    -- Read config for cooldown animation
-    local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
-
+    -- PERF: Use lightweight fake cooldown frame for vanilla to avoid expensive Model rendering
+    -- The Model-based CooldownFrameTemplate causes major lag with many nameplates
     if pfUI.client <= 11200 then
-      -- Use Model frame with CooldownFrameTemplate for proper pie animation in Vanilla
-      plate.debuffs[index].cd = CreateFrame("Model", plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index], "CooldownFrameTemplate")
+      plate.debuffs[index].cd = CreateFrame("Frame", plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index])
       plate.debuffs[index].cd:SetAllPoints(plate.debuffs[index])
+      plate.debuffs[index].cd:SetScript("OnUpdate", CooldownFrame_OnUpdateModel)
+      plate.debuffs[index].cd.AdvanceTime = DoNothing
+      plate.debuffs[index].cd.SetSequence = DoNothing
+      plate.debuffs[index].cd.SetSequenceTime = DoNothing
     else
       -- use regular cooldown animation frames on burning crusade and later
       plate.debuffs[index].cd = CreateFrame(COOLDOWN_FRAME_TYPE, plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index], "CooldownFrameTemplate")
     end
 
-    plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
+    plate.debuffs[index].cd.pfCooldownStyleAnimation = 0
     plate.debuffs[index].cd.pfCooldownType = "ALL"
   end
 
@@ -460,11 +492,8 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
           wipe(CastEvents[casterGUID])
         end
       end
-      
-      -- Propagate cast event to all nameplates
-      for plate in pairs(registry) do
-        plate.eventcache = true
-      end
+      -- PERF: Don't iterate all plates here - castbar updates read from CastEvents
+      -- directly in OnUpdate, so plates will pick up changes on their own cycle
     else
       this.eventcache = true
     end
@@ -477,6 +506,16 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     -- Throttle main scanner - increase to 0.1s in combat for better raid performance
     local throttle = nameplates.combat.inCombat and 0.1 or 0.05
     if (this.tick or 0) > now then return else this.tick = now + throttle end
+
+    -- PERF: Update visible plate count periodically for adaptive throttling
+    if now - lastVisibleCheck > 0.5 then
+      lastVisibleCheck = now
+      local count = 0
+      for plate in pairs(registry) do
+        if plate:IsVisible() then count = count + 1 end
+      end
+      visiblePlateCount = count
+    end
 
     -- propagate events to all nameplates
     if this.eventcache then
@@ -1051,10 +1090,15 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
           end
 
           if duration and timeleft and debuffdurations then
-            local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
-            plate.debuffs[index].cd:SetAlpha(cooldown_anim == 1 and 1 or 0)
-            plate.debuffs[index].cd:Show()
-            CooldownFrame_SetTimer(plate.debuffs[index].cd, GetTime() + timeleft - duration, duration, 1)
+            -- PERF: Only update cooldown if duration changed (avoid expensive SetTimer calls)
+            local cd = plate.debuffs[index].cd
+            local newStart = GetTime() + timeleft - duration
+            if not cd.lastStart or abs(cd.lastStart - newStart) > 0.5 then
+              cd:SetAlpha(0) -- Always hide animation for performance
+              cd:Show()
+              CooldownFrame_SetTimer(cd, newStart, duration, 1)
+              cd.lastStart = newStart
+            end
           end
 
           index = index + 1
@@ -1082,24 +1126,25 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     local nameplate = frame.nameplate
     local now = GetTime()
 
-    -- Performance: Skip invisible frames immediately
-    local isVisible = frame:IsVisible()
-    if not isVisible then return end
+    -- PERF: Skip invisible frames immediately
+    if not frame:IsVisible() then return end
 
-    -- Intelligent throttling based on target/castbar status
+    -- PERF: Intelligent throttling based on target/castbar status and plate count
     local target = UnitExists("target") and frame:GetAlpha() >= 0.99 or nil
     local isCasting = nameplate.castbar and nameplate.castbar:IsShown()
 
     local throttle
     if target or isCasting then
       throttle = 0.02  -- 50 FPS for target OR active castbar
+    elseif visiblePlateCount > 20 then
+      throttle = 0.15  -- ~7 FPS for mass pulls (20+ plates)
     else
-      throttle = 0.1   -- 10 FPS for others (healthbar updates)
+      throttle = 0.1   -- 10 FPS for others
     end
 
     if (nameplate.lasttick or 0) + throttle > now then return end
     nameplate.lasttick = now
-    
+
     local update
     local original = nameplate.original
     local name = original.name:GetText()
@@ -1112,7 +1157,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       nameplate.eventcache = nil
     end
 
-    -- OPTIMIZED: Cache strata changes
+    -- PERF: Cache strata changes
     if nameplate.istarget ~= target then
       nameplate.target_strata = nil
     end
@@ -1127,21 +1172,11 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
 
     nameplate.istarget = target
 
-    -- set non-target plate alpha (cached to prevent flicker)
-    local configAlpha = tonumber(C.nameplates.notargalpha)
-    if not configAlpha or configAlpha < 0 then
-      configAlpha = 100
-    end
-
-    -- Ensure we're working with 0-1 range
-    if configAlpha > 1 then
-      configAlpha = configAlpha / 100
-    end
-
-    local desiredAlpha = (target or not UnitExists("target")) and 1 or configAlpha
+    -- PERF: Use cached alpha value
+    local hasTarget = UnitExists("target")
+    local desiredAlpha = (target or not hasTarget) and 1 or GetNotargAlpha()
 
     if nameplate.cachedAlpha ~= desiredAlpha then
-      -- Setze nur die nameplate Alpha, nicht den parent frame
       nameplate:SetAlpha(desiredAlpha)
       nameplate.cachedAlpha = desiredAlpha
     end
@@ -1386,6 +1421,9 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   nameplates:SetGameVariables()
 
   nameplates.UpdateConfig = function()
+    -- PERF: Reset cached config values
+    cachedNotargAlpha = nil
+
     -- update debuff filters
     DebuffFilterPopulate()
 
