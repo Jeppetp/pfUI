@@ -68,7 +68,6 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   local parentcount = 0
   local platecount = 0
   local registry = {}
-  local debuffdurations = C.appearance.cd.debuffs == "1" and true or nil
 
   -- PERF: Track visible plate count for adaptive throttling
   local visiblePlateCount = 0
@@ -345,6 +344,10 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
 
     -- PERF: Use lightweight fake cooldown frame for vanilla to avoid expensive Model rendering
     -- The Model-based CooldownFrameTemplate causes major lag with many nameplates
+    -- Read config for cooldown animation and text
+    local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
+    local cooldown_text = tonumber(C.nameplates.debufftext) or 1
+
     if pfUI.client <= 11200 then
       plate.debuffs[index].cd = CreateFrame("Frame", plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index])
       plate.debuffs[index].cd:SetAllPoints(plate.debuffs[index])
@@ -357,7 +360,8 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       plate.debuffs[index].cd = CreateFrame(COOLDOWN_FRAME_TYPE, plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index], "CooldownFrameTemplate")
     end
 
-    plate.debuffs[index].cd.pfCooldownStyleAnimation = 0
+    plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
+    plate.debuffs[index].cd.pfCooldownStyleText = cooldown_text
     plate.debuffs[index].cd.pfCooldownType = "ALL"
   end
 
@@ -1089,12 +1093,16 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
             plate.debuffs[index].stacks:Hide()
           end
 
-          if duration and timeleft and debuffdurations then
+          if duration and timeleft and C.nameplates.debufftimers == "1" then
             -- PERF: Only update cooldown if duration changed (avoid expensive SetTimer calls)
             local cd = plate.debuffs[index].cd
+            local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
+            local cooldown_text = tonumber(C.nameplates.debufftext) or 1
             local newStart = GetTime() + timeleft - duration
             if not cd.lastStart or abs(cd.lastStart - newStart) > 0.5 then
-              cd:SetAlpha(0) -- Always hide animation for performance
+              cd.pfCooldownStyleAnimation = cooldown_anim
+              cd.pfCooldownStyleText = cooldown_text
+              cd:SetAlpha(cooldown_anim == 1 and 1 or 0)
               cd:Show()
               CooldownFrame_SetTimer(cd, newStart, duration, 1)
               cd.lastStart = newStart
