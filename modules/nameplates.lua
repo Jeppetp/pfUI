@@ -370,26 +370,26 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
 
     if pfUI.client <= 11200 then
-      -- Use Model frame with CooldownFrameTemplate for proper pie animation in Vanilla
-      plate.debuffs[index].cd = CreateFrame("Model", plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index], "CooldownFrameTemplate")
-      plate.debuffs[index].cd:SetAllPoints(plate.debuffs[index])
-      plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
-      plate.debuffs[index].cd.pfCooldownStyleText = cooldown_text
-    else
-      -- use regular cooldown animation frames on burning crusade and later
+      -- Animation enabled: Use Model frame with CooldownFrameTemplate
       plate.debuffs[index].cd = CreateFrame(COOLDOWN_FRAME_TYPE, plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index], "CooldownFrameTemplate")
-      -- Setup for animation support
-      local debuffsize = tonumber(C.nameplates.debuffsize) or 20
-      local cdScale = debuffsize / 32
-      plate.debuffs[index].cd:ClearAllPoints()
-      plate.debuffs[index].cd:SetScale(cdScale)
       plate.debuffs[index].cd:SetAllPoints(plate.debuffs[index])
-      plate.debuffs[index].cd:SetFrameLevel(plate.debuffs[index]:GetFrameLevel() + 1)
-      plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
+      plate.debuffs[index].cd.pfCooldownStyleAnimation = 1
       plate.debuffs[index].cd.pfCooldownStyleText = cooldown_text
+      plate.debuffs[index].cd.pfCooldownType = "ALL"
+    else
+      -- Animation disabled: Create fake cooldown frame for performance (like ShaguPlates)
+      plate.debuffs[index].cd = CreateFrame("Frame", plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index])
+      plate.debuffs[index].cd:SetAllPoints(plate.debuffs[index])
+      
+      -- Add dummy functions so CooldownFrame_SetTimer doesn't crash
+      plate.debuffs[index].cd.AdvanceTime = DoNothing
+      plate.debuffs[index].cd.SetSequence = DoNothing
+      plate.debuffs[index].cd.SetSequenceTime = DoNothing
+      
+      plate.debuffs[index].cd.pfCooldownStyleAnimation = 0
+      plate.debuffs[index].cd.pfCooldownStyleText = cooldown_text
+      plate.debuffs[index].cd.pfCooldownType = "ALL"
     end
-
-    plate.debuffs[index].cd.pfCooldownType = "ALL"
   end
 
   local function UpdateDebuffConfig(nameplate, i)
@@ -1225,8 +1225,6 @@ nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
             plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
             plate.debuffs[index].cd.pfCooldownType = "ALL"
             
-            -- Set alpha based on animation config (0 = hide animation, 1 = show)
-            plate.debuffs[index].cd:SetAlpha(cooldown_anim == 1 and 1 or 0)
             plate.debuffs[index].cd:Show()
             CooldownFrame_SetTimer(plate.debuffs[index].cd, GetTime() + timeleft - duration, duration, 1)
           end
