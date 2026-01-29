@@ -342,13 +342,13 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     plate.debuffs[index].stacks:SetJustifyV("BOTTOM")
     plate.debuffs[index].stacks:SetTextColor(1,1,0)
 
-    -- PERF: Use lightweight fake cooldown frame for vanilla to avoid expensive Model rendering
-    -- The Model-based CooldownFrameTemplate causes major lag with many nameplates
     -- Read config for cooldown animation and text
     local cooldown_anim = tonumber(C.nameplates.debuffanim) or 0
     local cooldown_text = tonumber(C.nameplates.debufftext) or 1
 
-    if pfUI.client <= 11200 then
+    if pfUI.client <= 11200 and cooldown_anim ~= 1 then
+      -- PERF: Use lightweight fake cooldown frame when animation disabled
+      -- The Model-based CooldownFrameTemplate causes major lag with many nameplates
       plate.debuffs[index].cd = CreateFrame("Frame", plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index])
       plate.debuffs[index].cd:SetAllPoints(plate.debuffs[index])
       plate.debuffs[index].cd:SetScript("OnUpdate", CooldownFrame_OnUpdateModel)
@@ -356,8 +356,9 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
       plate.debuffs[index].cd.SetSequence = DoNothing
       plate.debuffs[index].cd.SetSequenceTime = DoNothing
     else
-      -- use regular cooldown animation frames on burning crusade and later
+      -- Use CooldownFrameTemplate for animation or TBC+
       plate.debuffs[index].cd = CreateFrame(COOLDOWN_FRAME_TYPE, plate.platename.."Debuff"..index.."Cooldown", plate.debuffs[index], "CooldownFrameTemplate")
+      plate.debuffs[index].cd:SetAllPoints(plate.debuffs[index])
     end
 
     plate.debuffs[index].cd.pfCooldownStyleAnimation = cooldown_anim
