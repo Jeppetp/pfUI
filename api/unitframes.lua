@@ -45,6 +45,10 @@ local glow2 = {
   insets = {left = 0, right = 0, top = 0, bottom = 0},
 }
 
+local function DoNothing()
+  return
+end
+
 local maxdurations = {}
 local function BuffOnUpdate()
   if ( this.tick or 1) > GetTime() then return else this.tick = GetTime() + .2 end
@@ -898,7 +902,16 @@ function pfUI.uf:UpdateConfig()
       
       -- Create CD frame if it doesn't exist
       if not f.buffs[i].cd then
-        f.buffs[i].cd = CreateFrame(COOLDOWN_FRAME_TYPE, f.buffs[i]:GetName() .. "Cooldown", f.buffs[i], "CooldownFrameTemplate")
+        if cooldown_anim == 1 then
+          -- Animation enabled: Use Model frame with CooldownFrameTemplate
+          f.buffs[i].cd = CreateFrame(COOLDOWN_FRAME_TYPE, f.buffs[i]:GetName() .. "Cooldown", f.buffs[i], "CooldownFrameTemplate")
+        else
+          -- Animation disabled: Use regular Frame with dummy functions
+          f.buffs[i].cd = CreateFrame("Frame", f.buffs[i]:GetName() .. "Cooldown", f.buffs[i])
+          f.buffs[i].cd.AdvanceTime = DoNothing
+          f.buffs[i].cd.SetSequence = DoNothing
+          f.buffs[i].cd.SetSequenceTime = DoNothing
+        end
       end
       
       -- Always update CD properties (in case size changed)
@@ -973,7 +986,16 @@ function pfUI.uf:UpdateConfig()
       
       -- Create CD frame if it doesn't exist
       if not f.debuffs[i].cd then
-        f.debuffs[i].cd = CreateFrame(COOLDOWN_FRAME_TYPE, f.debuffs[i]:GetName() .. "Cooldown", f.debuffs[i], "CooldownFrameTemplate")
+        if cooldown_anim == 1 then
+          -- Animation enabled: Use Model frame with CooldownFrameTemplate
+          f.debuffs[i].cd = CreateFrame(COOLDOWN_FRAME_TYPE, f.debuffs[i]:GetName() .. "Cooldown", f.debuffs[i], "CooldownFrameTemplate")
+        else
+          -- Animation disabled: Use regular Frame with dummy functions
+          f.debuffs[i].cd = CreateFrame("Frame", f.debuffs[i]:GetName() .. "Cooldown", f.debuffs[i])
+          f.debuffs[i].cd.AdvanceTime = DoNothing
+          f.debuffs[i].cd.SetSequence = DoNothing
+          f.debuffs[i].cd.SetSequenceTime = DoNothing
+        end
       end
       
       -- Always update CD properties (in case size changed)
@@ -2639,7 +2661,18 @@ function pfUI.uf:AddIcon(frame, pos, icon, timeleft, stacks, start, duration)
     frame.icon[pos].stacks:SetPoint("BOTTOMRIGHT", 0, 0)
     frame.icon[pos].stacks:SetJustifyH("RIGHT")
     frame.icon[pos].stacks:SetJustifyV("BOTTOM")
-    frame.icon[pos].cd = CreateFrame(COOLDOWN_FRAME_TYPE, nil, frame.icon[pos])
+
+    -- Check if parent frame has cooldown animation enabled
+    local parent_cooldown_anim = frame.config and tonumber(frame.config.cooldown_anim) or 1
+    if parent_cooldown_anim == 1 then
+      frame.icon[pos].cd = CreateFrame(COOLDOWN_FRAME_TYPE, nil, frame.icon[pos])
+    else
+      frame.icon[pos].cd = CreateFrame("Frame", nil, frame.icon[pos])
+      frame.icon[pos].cd.AdvanceTime = DoNothing
+      frame.icon[pos].cd.SetSequence = DoNothing
+      frame.icon[pos].cd.SetSequenceTime = DoNothing
+    end
+    
     frame.icon[pos].cd.pfCooldownStyleAnimation = 0
     frame.icon[pos].cd.pfCooldownType = "ALL"
     frame.icon[pos].cd:SetFrameLevel(48)
