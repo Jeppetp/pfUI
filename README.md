@@ -37,6 +37,75 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 
 ---
 
+## 🎯 What's New in Version 7.4.3 (January 29, 2026)
+
+### ⚡ Massive Performance Optimization - Cooldown Frame Overhaul
+
+**Revolutionary frame creation system that eliminates unnecessary Model frames:**
+
+Previously, pfUI created expensive Model frames for every single buff/debuff cooldown timer, even when the animation was disabled. This caused significant performance overhead, especially in 40-man raids where hundreds of frames were created but never actually used.
+
+**The Problem:**
+- Old system: **ALWAYS** created Model frames with `CooldownFrameTemplate`
+- When animation was disabled, frames were just hidden with `SetAlpha(0)`
+- The frames still existed and consumed CPU resources in the background
+- In raids: 40 players × 32 buffs/debuffs = **1,280 Model frames** running even when animations were off!
+
+**The Solution (Nameplates.lua + Unitframes.lua):**
+- New system: Creates **Frame type based on config setting**
+- Animation ON → Model frame with `CooldownFrameTemplate` (expensive but animated)
+- Animation OFF → Regular Frame with dummy functions (lightweight, no animation)
+- Dummy functions (`DoNothing()`) prevent crashes when `CooldownFrame_SetTimer()` is called
+
+**Performance Impact:**
+
+| Scenario | Before 7.4.3 | After 7.4.3 | Improvement |
+|----------|--------------|-------------|-------------|
+| Player frame (animation ON) | 32 Model frames | 32 Model frames | No change ✅ |
+| 40 raid frames (animation OFF) | 1,280 Model frames | 1,280 Light frames | **100% lighter!** 🚀 |
+| Mixed (player ON, raid OFF) | 1,312 Model frames | 32 Model + 1,280 Light | **98% less Model frames!** 🎯 |
+
+**Real-World Example:**
+```
+Before: ALL frames = 1,312 expensive Model frames
+After:  32 Model (player) + 1,280 Light (raid) = 98% reduction in overhead
+```
+
+**Technical Implementation:**
+
+```lua
+-- Nameplates.lua & Unitframes.lua
+if cooldown_anim == 1 then
+  -- Create expensive Model frame
+  cd = CreateFrame("Model", ...)
+else
+  -- Create lightweight Frame
+  cd = CreateFrame("Frame", ...)
+  cd.AdvanceTime = DoNothing
+  cd.SetSequence = DoNothing
+  cd.SetSequenceTime = DoNothing
+end
+```
+
+**User Experience:**
+- ✅ **GUI Integration:** Toggling "Show Timer Animation" now prompts for `/reload`
+- ✅ **Per-Frame Control:** Each unitframe type (player/target/raid/party) has independent settings
+- ✅ **Immediate Effect:** Reload applies the correct frame type based on your config
+- ✅ **No Visual Change:** When animation is ON, everything looks identical (just way more efficient!)
+
+**Why This Matters:**
+- **40-man raids:** Dramatically reduced frame update overhead
+- **Low-end PCs:** Smoother gameplay with animations disabled
+- **Battery life:** Less CPU usage = longer laptop battery
+- **Future-proof:** Foundation for more performance optimizations
+
+**Compatibility:**
+- Works with existing timer text display (independent of animation)
+- Fully backward compatible with all existing configs
+- No changes needed to user settings (automatic on reload)
+
+---
+
 ## 🎯 What's New in Version 7.4.2 (January 28, 2026)
 
 ### Major Performance Improvements
