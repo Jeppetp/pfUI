@@ -610,7 +610,7 @@ local function CleanupOutOfRangeUnits()
   local now = GetTime()
   if now - lastRangeCheck < 10 then return end  -- Reduced from 30s to 10s
   lastRangeCheck = now
-  
+
   -- Build set of all GUIDs across all tables
   local allGuids = {}
   for guid in pairs(ownDebuffs) do allGuids[guid] = true end
@@ -619,14 +619,14 @@ local function CleanupOutOfRangeUnits()
   for guid in pairs(allAuraCasts) do allGuids[guid] = true end
   for guid in pairs(objectsByGuid) do allGuids[guid] = true end
   for guid in pairs(pendingCasts) do allGuids[guid] = true end
-  
+
   local cleanedCount = 0
-  
+
   -- Check each GUID
   for guid in pairs(allGuids) do
     local exists = UnitExists and UnitExists(guid)
     local isDead = UnitIsDead and UnitIsDead(guid)
-    
+
     -- Cleanup if:
     -- 1. Unit doesn't exist anymore (despawned/out of range)
     -- 2. OR unit is dead (fallback in case UNIT_HEALTH event was missed)
@@ -636,25 +636,25 @@ local function CleanupOutOfRangeUnits()
       end
     end
   end
-  
+
   if debugStats.enabled and cleanedCount > 0 then
     DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[PERIODIC CLEANUP]|r Cleaned %d units (dead or out of range)", cleanedCount))
   end
-  
+
   -- Cleanup old lastCastRanks entries (older than 3 seconds)
   for spell, data in pairs(lastCastRanks) do
     if now - data.time > 3 then
       lastCastRanks[spell] = nil
     end
   end
-  
+
   -- Cleanup old lastFailedSpells entries (older than 2 seconds)
   for spell, data in pairs(lastFailedSpells) do
     if now - data.time > 2 then
       lastFailedSpells[spell] = nil
     end
   end
-  
+
   -- Cleanup old pendingCasts (integrated here for efficiency)
   for guid, spells in pairs(pendingCasts) do
     for spell, data in pairs(spells) do
@@ -682,6 +682,14 @@ function libdebuff:DidSpellFail(spell)
     return true
   end
   return false
+end
+
+-- Gibt die zuletzt ausgegebenen Combo Points zurück (innerhalb 1 Sekunde)
+local function GetStoredComboPoints()
+  if lastSpentComboPoints > 0 and (GetTime() - lastSpentTime) < 1 then
+    return lastSpentComboPoints
+  end
+  return 0
 end
 
 -- Shared Debuffs: Diese werden von allen Spielern geteilt (nur einer kann drauf sein)
@@ -915,6 +923,11 @@ libdebuff:RegisterEvent("PLAYER_LOGOUT")
 libdebuff:RegisterEvent("SPELLCAST_STOP")
 libdebuff:RegisterEvent("UNIT_AURA")
 
+-- register combo points tracking for Druids and Rogues
+if class == "DRUID" or class == "ROGUE" then
+  libdebuff:RegisterEvent("PLAYER_COMBO_POINTS")
+end
+
 -- register seal handler
 if class == "PALADIN" then
   libdebuff:RegisterEvent("CHAT_MSG_COMBAT_SELF_HITS")
@@ -1024,6 +1037,16 @@ libdebuff:SetScript("OnEvent", function()
     end
   elseif event == "SPELLCAST_STOP" then
     libdebuff:PersistPending()
+  elseif event == "PLAYER_COMBO_POINTS" then
+    -- Track combo points for Druid AND Rogue (both use CP-based abilities)
+    if class ~= "DRUID" and class ~= "ROGUE" then return end
+    local current = GetComboPoints("player", "target") or 0
+    if current < currentComboPoints then
+      -- Combo points were spent!
+      lastSpentComboPoints = currentComboPoints
+      lastSpentTime = GetTime()
+    end
+    currentComboPoints = current
   end
 end)
 

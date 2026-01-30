@@ -287,7 +287,8 @@ end
 
 local aggrodata = { }
 function pfUI.api.UnitHasAggro(unit)
-  if aggrodata[unit] and GetTime() < aggrodata[unit].check + 1 then
+  -- Only cache positive results to allow instant detection when aggro changes
+  if aggrodata[unit] and aggrodata[unit].state > 0 and GetTime() < aggrodata[unit].check + 1 then
     return aggrodata[unit].state
   end
 
@@ -313,7 +314,7 @@ function pfUI.api.UnitHasAggro(unit)
   return aggrodata[unit].state
 end
 
-pfUI.uf.glow = CreateFrame("Frame")
+pfUI.uf.glow = CreateFrame("Frame", nil, UIParent)
 pfUI.uf.glow:SetScript("OnUpdate", function()
   local fpsmod = GetFramerate() / 30
   if not this.val or this.val >= .8 then
@@ -325,10 +326,13 @@ pfUI.uf.glow:SetScript("OnUpdate", function()
 end)
 
 pfUI.uf.glow.mod = 0
-pfUI.uf.glow.val = 0
+pfUI.uf.glow.val = 0.6
 
 function pfUI.uf.glow.UpdateGlowAnimation()
-  this:SetAlpha(pfUI.uf.glow.val)
+  local val = pfUI.uf.glow.val or 0.6
+  if val < 0.4 then val = 0.4 end
+  if val > 0.8 then val = 0.8 end
+  this:SetAlpha(val)
 end
 
 local detect_icon, detect_name
@@ -976,7 +980,7 @@ function pfUI.uf:UpdateConfig()
       f.debuffs[i].stacks:SetShadowColor(0, 0, 0)
       f.debuffs[i].stacks:SetShadowOffset(0.8, -0.8)
       f.debuffs[i].stacks:SetTextColor(1,1,.5)
-      
+
       f.debuffs[i]:SetFrameLevel(12)
       f.debuffs[i]:RegisterForClicks("RightButtonUp")
       f.debuffs[i]:ClearAllPoints()
@@ -1736,14 +1740,14 @@ function pfUI.uf:CreateUnitFrame(unit, id, config, tick)
   f.GetColor         = pfUI.uf.GetColor
 
   -- cache values to the frame
-  f.label = unit
+  f.label = strlower(unit)
   f.fname = fname
   f.id = id
   f.config = config or pfUI_config.unitframes.fallback
   f.tick = tick
 
   -- disable events for unknown unitstrings
-  if not pfValidUnits[unit .. id] then
+  if not pfValidUnits[strlower(unit) .. id] then
     f.unitname = unit
     f.label, f.id = "", ""
     f.RegisterEvent = function() return end
