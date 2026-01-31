@@ -147,7 +147,8 @@ pfUI.libdebuff_all_auras = pfUI.libdebuff_all_auras or {}
 local allAuraCasts = pfUI.libdebuff_all_auras
 
 -- pendingCasts: [targetGUID][spellName] = {casterGuid, time} (temporary storage from UNIT_CASTEVENT)
-local pendingCasts = {}
+pfUI.libdebuff_pending = pfUI.libdebuff_pending or {}
+local pendingCasts = pfUI.libdebuff_pending
 
 -- Cleveroids API: [targetGUID][spellID] = {start, duration, caster, stacks}
 pfUI.libdebuff_objects_guid = pfUI.libdebuff_objects_guid or {}
@@ -221,7 +222,7 @@ local lastEventTime = 0
 local lastRangeCheck = 0
 
 -- Debug Stats (for /pfui shifttest)
-local debugStats = {
+pfUI.libdebuff_debugstats = pfUI.libdebuff_debugstats or {
   enabled = false,
   trackAllUnits = false,  -- NEW: Track all units, not just target
   aura_cast = 0,
@@ -232,6 +233,7 @@ local debugStats = {
   shift_down = 0,
   shift_up = 0,
 }
+local debugStats = pfUI.libdebuff_debugstats
 
 -- Helper function for debug: safely show last 4 chars of GUID
 local function DebugGuid(guid)
@@ -607,10 +609,12 @@ local function CleanupPendingCasts()
 end
 
 -- Speichert die Ranks der zuletzt gecasteten Spells (bleibt länger als pending)
-local lastCastRanks = {}
+pfUI.libdebuff_lastranks = pfUI.libdebuff_lastranks or {}
+local lastCastRanks = pfUI.libdebuff_lastranks
 
 -- Speichert Spells die gefailed sind (miss/dodge/parry/etc.) für 1 Sekunde
-local lastFailedSpells = {}
+pfUI.libdebuff_lastfailed = pfUI.libdebuff_lastfailed or {}
+local lastFailedSpells = pfUI.libdebuff_lastfailed
 
 -- ============================================================================
 -- PERIODIC CLEANUP: Check all units every 10s (fallback for missed events)
@@ -1092,7 +1096,8 @@ hooksecurefunc("UseAction", function(slot, target, button)
 end)
 
 -- Debug throttle for UnitDebuff (to avoid spam)
-local lastUnitDebuffLog = {}
+pfUI.libdebuff_lastlog = pfUI.libdebuff_lastlog or {}
+local lastUnitDebuffLog = pfUI.libdebuff_lastlog
 local UNITDEBUFF_LOG_THROTTLE = 5 -- seconds
 
 function libdebuff:UnitDebuff(unit, id)
@@ -1302,7 +1307,8 @@ function libdebuff:UnitDebuff(unit, id)
   return effect, rank, texture, stacks, dtype, duration, timeleft, caster
 end
 
-local cache = {}
+pfUI.libdebuff_cache = pfUI.libdebuff_cache or {}
+local cache = pfUI.libdebuff_cache
 function libdebuff:UnitOwnDebuff(unit, id)
   -- Mit Nampower: Direkt aus ownDebuffs lesen
   if hasNampower and UnitExists then
