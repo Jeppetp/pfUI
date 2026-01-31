@@ -52,20 +52,32 @@ end
 local maxdurations = {}
 local function BuffOnUpdate()
   if ( this.tick or 1) > GetTime() then return else this.tick = GetTime() + .2 end
-  local timeleft = GetPlayerBuffTimeLeft(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL"))
-  local texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL"))
+  local bid = GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL")
+  local timeleft = GetPlayerBuffTimeLeft(bid)
+  local texture = GetPlayerBuffTexture(bid)
   local start = 0
 
-  if timeleft > 0 then
-    if not maxdurations[texture] then
-      maxdurations[texture] = timeleft
-    elseif maxdurations[texture] and maxdurations[texture] < timeleft then
-      maxdurations[texture] = timeleft
+  -- Get buff name for unique key (two buffs could share same texture)
+  local name = ""
+  if texture and libtipscan then
+    scanner = scanner or libtipscan:GetScanner("unitframes")
+    if scanner then
+      scanner:SetPlayerBuff(bid)
+      name = scanner:Line(1) or ""
     end
-    start = GetTime() + timeleft - maxdurations[texture]
+  end
+  local key = texture .. name
+
+  if timeleft > 0 then
+    if not maxdurations[key] then
+      maxdurations[key] = timeleft
+    elseif maxdurations[key] and maxdurations[key] < timeleft then
+      maxdurations[key] = timeleft
+    end
+    start = GetTime() + timeleft - maxdurations[key]
   end
 
-  CooldownFrame_SetTimer(this.cd, start, maxdurations[texture], timeleft > 0 and 1 or 0)
+  CooldownFrame_SetTimer(this.cd, start, maxdurations[key], timeleft > 0 and 1 or 0)
 end
 
 local function TargetBuffOnUpdate()
@@ -138,20 +150,32 @@ end
 
 local function DebuffOnUpdate()
   if ( this.tick or 1) > GetTime() then return else this.tick = GetTime() + .2 end
-  local timeleft = GetPlayerBuffTimeLeft(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HARMFUL"))
-  local texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HARMFUL"))
+  local bid = GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HARMFUL")
+  local timeleft = GetPlayerBuffTimeLeft(bid)
+  local texture = GetPlayerBuffTexture(bid)
   local start = 0
 
-  if timeleft > 0 then
-    if not maxdurations[texture] then
-      maxdurations[texture] = timeleft
-    elseif maxdurations[texture] and maxdurations[texture] < timeleft then
-      maxdurations[texture] = timeleft
+  -- Get debuff name for unique key (two debuffs could share same texture)
+  local name = ""
+  if texture and libtipscan then
+    scanner = scanner or libtipscan:GetScanner("unitframes")
+    if scanner then
+      scanner:SetPlayerBuff(bid)
+      name = scanner:Line(1) or ""
     end
-    start = GetTime() + timeleft - maxdurations[texture]
+  end
+  local key = texture .. name
+
+  if timeleft > 0 then
+    if not maxdurations[key] then
+      maxdurations[key] = timeleft
+    elseif maxdurations[key] and maxdurations[key] < timeleft then
+      maxdurations[key] = timeleft
+    end
+    start = GetTime() + timeleft - maxdurations[key]
   end
 
-  CooldownFrame_SetTimer(this.cd, start, maxdurations[texture], timeleft > 0 and 1 or 0)
+  CooldownFrame_SetTimer(this.cd, start, maxdurations[key], timeleft > 0 and 1 or 0)
 end
 
 local function DebuffOnEnter()
