@@ -54,7 +54,15 @@ pfUI:RegisterModule("nampower", "vanilla", function ()
 
     local queue = CreateFrame("Frame")
     queue:RegisterEvent("SPELL_QUEUE_EVENT")
+    queue:RegisterEvent("PLAYER_LOGOUT")
     queue:SetScript("OnEvent", function()
+      -- Handle shutdown to prevent crash 132
+      if event == "PLAYER_LOGOUT" then
+        this:UnregisterAllEvents()
+        this:SetScript("OnEvent", nil)
+        return
+      end
+      
       local eventCode = arg1
       local spellId = arg2
 

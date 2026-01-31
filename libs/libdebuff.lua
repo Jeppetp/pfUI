@@ -42,7 +42,16 @@ local nampowerCheckFrame = CreateFrame("Frame")
 local nampowerCheckTimer = 0
 local nampowerCheckDone = false
 nampowerCheckFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+nampowerCheckFrame:RegisterEvent("PLAYER_LOGOUT")
 nampowerCheckFrame:SetScript("OnEvent", function()
+  -- Handle shutdown to prevent crash 132
+  if event == "PLAYER_LOGOUT" then
+    this:UnregisterAllEvents()
+    this:SetScript("OnEvent", nil)
+    this:SetScript("OnUpdate", nil)
+    return
+  end
+  
   nampowerCheckFrame:SetScript("OnUpdate", function()
     nampowerCheckTimer = nampowerCheckTimer + arg1
     if nampowerCheckTimer >= 5 and not nampowerCheckDone then
@@ -933,7 +942,8 @@ libdebuff.pending = {}
 libdebuff:SetScript("OnEvent", function()
   -- Stop event handling during logout to prevent crash 132
   if event == "PLAYER_LOGOUT" then
-    libdebuff:SetScript("OnEvent", nil)
+    this:UnregisterAllEvents()
+    this:SetScript("OnEvent", nil)
     return
     
   -- paladin seal refresh
@@ -1375,7 +1385,9 @@ if hasNampower then
     if event == "PLAYER_LOGOUT" then
       -- Stop event handling to prevent crash 132 during logout
       -- (UnitExists calls during logout can crash with UnitXP)
-      frame:SetScript("OnEvent", nil)
+      this:UnregisterAllEvents()
+      this:SetScript("OnEvent", nil)
+      return
       
     elseif event == "PLAYER_ENTERING_WORLD" then
       GetPlayerGUID()

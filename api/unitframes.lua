@@ -1050,6 +1050,14 @@ function pfUI.uf.OnShow()
 end
 
 function pfUI.uf.OnEvent()
+  -- Handle shutdown to prevent crash 132
+  if event == "PLAYER_LOGOUT" then
+    this:UnregisterAllEvents()
+    this:SetScript("OnEvent", nil)
+    this:SetScript("OnUpdate", nil)
+    return
+  end
+  
   -- update indicators
   if event == "PARTY_LEADER_CHANGED" or
      event == "PARTY_LOOT_METHOD_CHANGED" or
@@ -1649,6 +1657,7 @@ function pfUI.uf:EnableEvents()
   local f = self
 
   f:RegisterEvent("PLAYER_ENTERING_WORLD")
+  f:RegisterEvent("PLAYER_LOGOUT")
   f:RegisterEvent("UNIT_DISPLAYPOWER")
   f:RegisterEvent("UNIT_HEALTH")
   f:RegisterEvent("UNIT_MAXHEALTH")

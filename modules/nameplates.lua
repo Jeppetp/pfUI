@@ -475,8 +475,9 @@ nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
   nameplates:SetScript("OnEvent", function()
     -- Stop event handling during logout to prevent crash 132
     if event == "PLAYER_LOGOUT" then
-      nameplates:SetScript("OnEvent", nil)
-      nameplates:SetScript("OnUpdate", nil)
+      this:UnregisterAllEvents()
+      this:SetScript("OnEvent", nil)
+      this:SetScript("OnUpdate", nil)
       if nameplates.mouselook then
         nameplates.mouselook:SetScript("OnUpdate", nil)
       end
@@ -710,7 +711,8 @@ nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
   nameplates.combat:RegisterEvent("PLAYER_LOGOUT")
   nameplates.combat:SetScript("OnEvent", function()
     if event == "PLAYER_LOGOUT" then
-      nameplates.combat:SetScript("OnEvent", nil)
+      this:UnregisterAllEvents()
+      this:SetScript("OnEvent", nil)
       return
     elseif event == "PLAYER_ENTER_COMBAT" then
       this.inCombat = 1
