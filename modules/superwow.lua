@@ -199,7 +199,13 @@ pfUI:RegisterModule("superwow", "vanilla", function ()
     druidmana:RegisterEvent("UNIT_MANA")
     druidmana:RegisterEvent("UNIT_MAXMANA")
     druidmana:RegisterEvent("UNIT_DISPLAYPOWER")
+    druidmana:RegisterEvent("PLAYER_LOGOUT")
     druidmana:SetScript("OnEvent", function()
+      if event == "PLAYER_LOGOUT" then
+        this:UnregisterAllEvents()
+        this:SetScript("OnEvent", nil)
+        return
+      end
       if UnitPowerType("player") == 0 then
         this:Hide()
         return
@@ -312,8 +318,14 @@ pfUI:RegisterModule("superwow", "vanilla", function ()
     trackFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
     trackFrame:RegisterEvent("RAID_ROSTER_UPDATE")
     trackFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    trackFrame:RegisterEvent("PLAYER_LOGOUT")
 
     trackFrame:SetScript("OnEvent", function()
+      if event == "PLAYER_LOGOUT" then
+        this:UnregisterAllEvents()
+        this:SetScript("OnEvent", nil)
+        return
+      end
       -- Track party members
       for i = 1, 4 do
         local unit = "party" .. i
@@ -483,7 +495,14 @@ pfUI:RegisterModule("superwow", "vanilla", function ()
 
   supercast:RegisterEvent("PLAYER_ENTERING_WORLD")
   supercast:RegisterEvent("UNIT_CASTEVENT")
+  supercast:RegisterEvent("PLAYER_LOGOUT")
+
   supercast:SetScript("OnEvent", function()
+    if event == "PLAYER_LOGOUT" then
+      this:UnregisterAllEvents()
+      this:SetScript("OnEvent", nil)
+      return
+    end
     if event == "PLAYER_ENTERING_WORLD" then
       -- Cache player GUID
       if UnitExists then
