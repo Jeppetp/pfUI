@@ -985,7 +985,16 @@ pfUI:RegisterModule("actionbar", "vanilla", function ()
     pageswitch:RegisterEvent("PLAYER_AURAS_CHANGED")
     pageswitch:RegisterEvent("PLAYER_ENTERING_WORLD")
     pageswitch:RegisterEvent("UNIT_CASTEVENT")
+    pageswitch:RegisterEvent("PLAYER_LOGOUT")
     pageswitch:SetScript("OnEvent", function()
+      -- Handle shutdown to prevent crash 132
+      if event == "PLAYER_LOGOUT" then
+        this:UnregisterAllEvents()
+        this:SetScript("OnEvent", nil)
+        this:SetScript("OnUpdate", nil)
+        return
+      end
+      
       if class ~= "DRUID" then return end
       
       -- On login/reload: full scan

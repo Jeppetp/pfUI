@@ -161,7 +161,29 @@ local function DebuffOnEnter()
   if this:GetParent().label == "player" then
     GameTooltip:SetPlayerBuff(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HARMFUL"))
   else
-    GameTooltip:SetUnitDebuff(this:GetParent().label .. this:GetParent().id, this.id)
+    local unitstr = this:GetParent().label .. this:GetParent().id
+    local parent = this:GetParent()
+    
+    -- For "only own debuffs" mode: find the REAL slot by matching spell name AND caster
+    if parent.config and parent.config.selfdebuff == "1" and libdebuff then
+      -- Get the spell name from our filtered list
+      local ownDebuffName = libdebuff:UnitOwnDebuff(unitstr, this.id)
+      
+      if ownDebuffName then
+        -- Search through all game slots to find OUR debuff with matching name
+        for gameSlot = 1, 16 do
+          local gameName, _, _, _, _, _, _, gameCaster = libdebuff:UnitDebuff(unitstr, gameSlot)
+          -- Match both name AND caster (must be ours)
+          if gameName == ownDebuffName and gameCaster == "player" then
+            GameTooltip:SetUnitDebuff(unitstr, gameSlot)
+            return
+          end
+        end
+      end
+    end
+    
+    -- Normal mode: use visual id directly
+    GameTooltip:SetUnitDebuff(unitstr, this.id)
   end
 end
 
@@ -1054,6 +1076,14 @@ function pfUI.uf.OnShow()
 end
 
 function pfUI.uf.OnEvent()
+  -- Handle shutdown to prevent crash 132
+  if event == "PLAYER_LOGOUT" then
+    this:UnregisterAllEvents()
+    this:SetScript("OnEvent", nil)
+    this:SetScript("OnUpdate", nil)
+    return
+  end
+  
   -- update indicators
   if event == "PARTY_LEADER_CHANGED" or
      event == "PARTY_LOOT_METHOD_CHANGED" or
@@ -1653,6 +1683,7 @@ function pfUI.uf:EnableEvents()
   local f = self
 
   f:RegisterEvent("PLAYER_ENTERING_WORLD")
+  f:RegisterEvent("PLAYER_LOGOUT")
   f:RegisterEvent("UNIT_DISPLAYPOWER")
   f:RegisterEvent("UNIT_HEALTH")
   f:RegisterEvent("UNIT_MAXHEALTH")

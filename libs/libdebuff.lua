@@ -42,7 +42,16 @@ local nampowerCheckFrame = CreateFrame("Frame")
 local nampowerCheckTimer = 0
 local nampowerCheckDone = false
 nampowerCheckFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+nampowerCheckFrame:RegisterEvent("PLAYER_LOGOUT")
 nampowerCheckFrame:SetScript("OnEvent", function()
+  -- Handle shutdown to prevent crash 132
+  if event == "PLAYER_LOGOUT" then
+    this:UnregisterAllEvents()
+    this:SetScript("OnEvent", nil)
+    this:SetScript("OnUpdate", nil)
+    return
+  end
+  
   nampowerCheckFrame:SetScript("OnUpdate", function()
     nampowerCheckTimer = nampowerCheckTimer + arg1
     if nampowerCheckTimer >= 5 and not nampowerCheckDone then
@@ -138,7 +147,8 @@ pfUI.libdebuff_all_auras = pfUI.libdebuff_all_auras or {}
 local allAuraCasts = pfUI.libdebuff_all_auras
 
 -- pendingCasts: [targetGUID][spellName] = {casterGuid, time} (temporary storage from UNIT_CASTEVENT)
-local pendingCasts = {}
+pfUI.libdebuff_pending = pfUI.libdebuff_pending or {}
+local pendingCasts = pfUI.libdebuff_pending
 
 -- Cleveroids API: [targetGUID][spellID] = {start, duration, caster, stacks}
 pfUI.libdebuff_objects_guid = pfUI.libdebuff_objects_guid or {}
@@ -212,7 +222,7 @@ local lastEventTime = 0
 local lastRangeCheck = 0
 
 -- Debug Stats (for /pfui shifttest)
-local debugStats = {
+pfUI.libdebuff_debugstats = pfUI.libdebuff_debugstats or {
   enabled = false,
   trackAllUnits = false,  -- NEW: Track all units, not just target
   aura_cast = 0,
@@ -223,6 +233,7 @@ local debugStats = {
   shift_down = 0,
   shift_up = 0,
 }
+local debugStats = pfUI.libdebuff_debugstats
 
 -- Helper function for debug: safely show last 4 chars of GUID
 local function DebugGuid(guid)
@@ -598,10 +609,12 @@ local function CleanupPendingCasts()
 end
 
 -- Speichert die Ranks der zuletzt gecasteten Spells (bleibt länger als pending)
-local lastCastRanks = {}
+pfUI.libdebuff_lastranks = pfUI.libdebuff_lastranks or {}
+local lastCastRanks = pfUI.libdebuff_lastranks
 
 -- Speichert Spells die gefailed sind (miss/dodge/parry/etc.) für 1 Sekunde
-local lastFailedSpells = {}
+pfUI.libdebuff_lastfailed = pfUI.libdebuff_lastfailed or {}
+local lastFailedSpells = pfUI.libdebuff_lastfailed
 
 -- ============================================================================
 -- PERIODIC CLEANUP: Check all units every 10s (fallback for missed events)
@@ -946,7 +959,8 @@ libdebuff.pending = {}
 libdebuff:SetScript("OnEvent", function()
   -- Stop event handling during logout to prevent crash 132
   if event == "PLAYER_LOGOUT" then
-    libdebuff:SetScript("OnEvent", nil)
+    this:UnregisterAllEvents()
+    this:SetScript("OnEvent", nil)
     return
     
   -- paladin seal refresh
@@ -1105,7 +1119,8 @@ hooksecurefunc("UseAction", function(slot, target, button)
 end)
 
 -- Debug throttle for UnitDebuff (to avoid spam)
-local lastUnitDebuffLog = {}
+pfUI.libdebuff_lastlog = pfUI.libdebuff_lastlog or {}
+local lastUnitDebuffLog = pfUI.libdebuff_lastlog
 local UNITDEBUFF_LOG_THROTTLE = 5 -- seconds
 
 function libdebuff:UnitDebuff(unit, id)
@@ -1315,7 +1330,8 @@ function libdebuff:UnitDebuff(unit, id)
   return effect, rank, texture, stacks, dtype, duration, timeleft, caster
 end
 
-local cache = {}
+pfUI.libdebuff_cache = pfUI.libdebuff_cache or {}
+local cache = pfUI.libdebuff_cache
 function libdebuff:UnitOwnDebuff(unit, id)
   -- Mit Nampower: Direkt aus ownDebuffs lesen
   if hasNampower and UnitExists then
@@ -1385,6 +1401,8 @@ if hasNampower then
   frame:RegisterEvent("PLAYER_TALENT_UPDATE")
   frame:RegisterEvent("PLAYER_LOGOUT")
   frame:RegisterEvent("UNIT_CASTEVENT")
+  frame:RegisterEvent("SPELL_GO_SELF")
+  frame:RegisterEvent("SPELL_GO_OTHER")
   frame:RegisterEvent("AURA_CAST_ON_SELF")
   frame:RegisterEvent("AURA_CAST_ON_OTHER")
   frame:RegisterEvent("DEBUFF_ADDED_OTHER")
@@ -1396,7 +1414,9 @@ if hasNampower then
     if event == "PLAYER_LOGOUT" then
       -- Stop event handling to prevent crash 132 during logout
       -- (UnitExists calls during logout can crash with UnitXP)
-      frame:SetScript("OnEvent", nil)
+      this:UnregisterAllEvents()
+      this:SetScript("OnEvent", nil)
+      return
       
     elseif event == "PLAYER_ENTERING_WORLD" then
       GetPlayerGUID()
@@ -1422,6 +1442,105 @@ if hasNampower then
       if guid and UnitIsDead and UnitIsDead(guid) then
         -- Unit just died - do targeted cleanup for this GUID
         CleanupUnit(guid)
+      end
+      
+    elseif event == "SPELL_GO_SELF" or event == "SPELL_GO_OTHER" then
+      local spellId = arg2
+      local casterGuid = arg3
+      local targetGuid = arg4
+      local numHit = arg6 or 0
+      local numMissed = arg7 or 0
+      
+      local spellName = GetSpellRecField(spellId, "name")
+      if not spellName then return end
+      
+      -- Spell missed - clear pending so no timer gets set
+      if numHit == 0 and numMissed > 0 then
+        if targetGuid and pendingCasts[targetGuid] then
+          pendingCasts[targetGuid][spellName] = nil
+        end
+        return
+      end
+      
+      -- Spell hit - do refresh logic for OWN debuffs
+      local myGuid = GetPlayerGUID()
+      local isOurs = (casterGuid == myGuid)
+      
+      -- Get cast rank from DBC (faster than SpellInfo)
+      local castRank = 0
+      local spellRankString = GetSpellRecField(spellId, "rank")
+      if spellRankString and spellRankString ~= "" then
+        castRank = tonumber((string.gsub(spellRankString, "Rank ", ""))) or 0
+      end
+      
+      if isOurs and targetGuid and ownDebuffs[targetGuid] and ownDebuffs[targetGuid][spellName] then
+        local existingData = ownDebuffs[targetGuid][spellName]
+        local timeleft = (existingData.startTime + existingData.duration) - GetTime()
+        
+        -- Get existing rank
+        local existingRank = 0
+        if type(existingData.rank) == "number" then
+          existingRank = existingData.rank
+        elseif type(existingData.rank) == "string" and existingData.rank ~= "" then
+          existingRank = tonumber((string.gsub(existingData.rank, "Rank ", ""))) or 0
+        end
+        
+        if timeleft > 0 then
+          -- Rank check: lower rank cannot refresh higher rank
+          if castRank > 0 and castRank < existingRank then
+          else
+            ownDebuffs[targetGuid][spellName].startTime = GetTime()
+            
+            -- Force UI refresh
+            if pfUI and pfUI.uf and pfUI.uf.target and UnitExists then
+              local _, currentTargetGuid = UnitExists("target")
+              if currentTargetGuid == targetGuid then
+                pfUI.uf:RefreshUnit(pfUI.uf.target, "aura")
+              end
+            end
+          end
+        end
+      
+      -- Refresh OTHER players' debuffs
+      elseif not isOurs and targetGuid and allAuraCasts[targetGuid] and allAuraCasts[targetGuid][spellName] and allAuraCasts[targetGuid][spellName][casterGuid] then
+        local existingData = allAuraCasts[targetGuid][spellName][casterGuid]
+        local timeleft = (existingData.startTime + existingData.duration) - GetTime()
+        
+        -- Get existing rank
+        local existingRank = 0
+        if type(existingData.rank) == "number" then
+          existingRank = existingData.rank
+        elseif type(existingData.rank) == "string" and existingData.rank ~= "" then
+          existingRank = tonumber((string.gsub(existingData.rank, "Rank ", ""))) or 0
+        end
+        
+        if timeleft > 0 then
+          if castRank > 0 and castRank < existingRank then
+            -- Lower rank cannot refresh higher rank
+          else
+            allAuraCasts[targetGuid][spellName][casterGuid].startTime = GetTime()
+            
+            -- Force UI refresh
+            if pfUI and pfUI.uf and pfUI.uf.target and UnitExists then
+              local _, currentTargetGuid = UnitExists("target")
+              if currentTargetGuid == targetGuid then
+                pfUI.uf:RefreshUnit(pfUI.uf.target, "aura")
+              end
+            end
+          end
+        end
+      end
+      
+      -- Carnage: Ferocious Bite refreshes Rip & Rake (only on HIT, only for us)
+      if class == "DRUID" and carnageRank == 2 and spellName == "Ferocious Bite" and isOurs then
+        if targetGuid and ownDebuffs[targetGuid] then
+          if ownDebuffs[targetGuid]["Rip"] then
+            ownDebuffs[targetGuid]["Rip"].startTime = GetTime()
+          end
+          if ownDebuffs[targetGuid]["Rake"] then
+            ownDebuffs[targetGuid]["Rake"].startTime = GetTime()
+          end
+        end
       end
       
     elseif event == "AURA_CAST_ON_SELF" or event == "AURA_CAST_ON_OTHER" then
@@ -1739,8 +1858,7 @@ if hasNampower then
       
       if not SpellInfo then return end
       
-      -- ✅ Get spell info including rank from SpellInfo
-      local spellName, spellRankString, texture = SpellInfo(spellId)
+      local spellName, spellRankString = SpellInfo(spellId)
       if not spellName then return end
       
       -- Extract rank number from rank string
@@ -1749,118 +1867,14 @@ if hasNampower then
         castRank = tonumber((string.gsub(spellRankString, "Rank ", ""))) or 0
       end
       
-      -- ✅ REFRESH DETECTION with RANK CHECK
-      local myGuid = GetPlayerGUID()
-      local isOurs = (casterGuid == myGuid)
-      
-      if isOurs and targetGuid and ownDebuffs[targetGuid] and ownDebuffs[targetGuid][spellName] then
-        -- Check existing rank before refreshing
-        local existingData = ownDebuffs[targetGuid][spellName]
-        local existingRank = 0
-        if type(existingData.rank) == "number" then
-          existingRank = existingData.rank
-        elseif type(existingData.rank) == "string" and existingData.rank ~= "" then
-          existingRank = tonumber((string.gsub(existingData.rank, "Rank ", ""))) or 0
-        end
-        
-        local timeleft = (existingData.startTime + existingData.duration) - GetTime()
-        
-        if timeleft > 0 and castRank > 0 and castRank < existingRank then
-          -- Lower rank cannot refresh higher rank!
-          if debugStats.enabled and IsCurrentTarget(targetGuid) then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[REFRESH BLOCKED OWN]|r %s Rank %d cannot refresh Rank %d", 
-              GetDebugTimestamp(), spellName, castRank, existingRank))
-          end
-        else
-          -- OK to refresh (same rank, higher rank, or castRank unknown)
-          ownDebuffs[targetGuid][spellName].startTime = GetTime()
-          if debugStats.enabled and IsCurrentTarget(targetGuid) then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00ff[REFRESH OWN]|r %s Rank %d on %s (duration=%.1fs)", 
-              GetDebugTimestamp(), spellName, castRank, DebugGuid(targetGuid), existingData.duration))
-          end
-          
-          -- ✅ Force refresh Target Frame if this is our current target
-          if targetGuid and pfUI and pfUI.uf and pfUI.uf.target and UnitExists then
-            local _, currentTargetGuid = UnitExists("target")
-            if currentTargetGuid == targetGuid then
-              pfUI.uf:RefreshUnit(pfUI.uf.target, "aura")
-              if debugStats.enabled and IsCurrentTarget(targetGuid) then
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[TARGET FRAME REFRESHED OWN]|r Called pfUI.uf:RefreshUnit for %s", 
-                  GetDebugTimestamp(), spellName))
-              end
-            end
-          end
-        end
-        
-      elseif not isOurs and targetGuid and allAuraCasts[targetGuid] and allAuraCasts[targetGuid][spellName] and allAuraCasts[targetGuid][spellName][casterGuid] then
-        -- Check existing rank before refreshing
-        local existingData = allAuraCasts[targetGuid][spellName][casterGuid]
-        local existingRank = 0
-        if type(existingData.rank) == "number" then
-          existingRank = existingData.rank
-        elseif type(existingData.rank) == "string" and existingData.rank ~= "" then
-          existingRank = tonumber((string.gsub(existingData.rank, "Rank ", ""))) or 0
-        end
-        
-        local timeleft = (existingData.startTime + existingData.duration) - GetTime()
-        
-        if timeleft > 0 and castRank > 0 and castRank < existingRank then
-          -- Lower rank cannot refresh higher rank!
-          if debugStats.enabled and IsCurrentTarget(targetGuid) then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[REFRESH BLOCKED OTHER]|r %s Rank %d cannot refresh Rank %d", 
-              GetDebugTimestamp(), spellName, castRank, existingRank))
-          end
-        else
-          -- OK to refresh (same rank, higher rank, or castRank unknown)
-          allAuraCasts[targetGuid][spellName][casterGuid].startTime = GetTime()
-          if debugStats.enabled and IsCurrentTarget(targetGuid) then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00ff[REFRESH OTHER]|r %s Rank %d on %s by %s (duration=%.1fs)", 
-              GetDebugTimestamp(), spellName, castRank, DebugGuid(targetGuid), DebugGuid(casterGuid), existingData.duration))
-          end
-          
-          -- ✅ Force refresh Target Frame if this is our current target
-          if targetGuid and pfUI and pfUI.uf and pfUI.uf.target and UnitExists then
-            local _, currentTargetGuid = UnitExists("target")
-            if currentTargetGuid == targetGuid then
-              pfUI.uf:RefreshUnit(pfUI.uf.target, "aura")
-              if debugStats.enabled and IsCurrentTarget(targetGuid) then
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[TARGET FRAME REFRESHED]|r Called pfUI.uf:RefreshUnit for %s", 
-                  GetDebugTimestamp(), spellName))
-              end
-            elseif debugStats.enabled and IsCurrentTarget(targetGuid) then
-              DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff9900[NOT CURRENT TARGET]|r target=%s current=%s", 
-                GetDebugTimestamp(), DebugGuid(targetGuid), DebugGuid(currentTargetGuid)))
-            end
-          elseif debugStats.enabled and IsCurrentTarget(targetGuid) then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[REFRESH SKIP]|r pfUI=%s uf=%s target=%s UnitExists=%s", 
-              GetDebugTimestamp(), tostring(pfUI~=nil), tostring(pfUI and pfUI.uf~=nil), tostring(pfUI and pfUI.uf and pfUI.uf.target~=nil), tostring(UnitExists~=nil)))
-          end
-        end
-      end
-      
-      -- Store in pendingCasts for later use in DEBUFF_ADDED
+      -- Store in pendingCasts for SPELL_GO and DEBUFF_ADDED
       if targetGuid then
         pendingCasts[targetGuid] = pendingCasts[targetGuid] or {}
         pendingCasts[targetGuid][spellName] = {
           casterGuid = casterGuid,
+          rank = castRank,
           time = GetTime()
         }
-      end
-      
-      -- Carnage: Ferocious Bite refresht Rip & Rake (nur für uns)
-      if class == "DRUID" and carnageRank == 2 and spellName == "Ferocious Bite" then
-        local myGuid = GetPlayerGUID()
-        if myGuid and casterGuid == myGuid then
-          -- Refresh in ownDebuffs
-          if targetGuid and ownDebuffs[targetGuid] then
-            if ownDebuffs[targetGuid]["Rip"] then
-              ownDebuffs[targetGuid]["Rip"].startTime = GetTime()
-            end
-            if ownDebuffs[targetGuid]["Rake"] then
-              ownDebuffs[targetGuid]["Rake"].startTime = GetTime()
-            end
-          end
-        end
       end
       
     elseif event == "DEBUFF_ADDED_OTHER" then

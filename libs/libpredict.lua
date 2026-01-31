@@ -98,6 +98,7 @@ local libpredict = CreateFrame("Frame")
 libpredict:RegisterEvent("UNIT_HEALTH")
 libpredict:RegisterEvent("CHAT_MSG_ADDON")
 libpredict:RegisterEvent("PLAYER_TARGET_CHANGED")
+libpredict:RegisterEvent("PLAYER_LOGOUT")
 
 -- SuperWoW: Registriere UNIT_CASTEVENT für akkurate Instant-HoT Detection
 if superwow_active then
@@ -105,6 +106,13 @@ if superwow_active then
 end
 
 libpredict:SetScript("OnEvent", function()
+  -- Handle shutdown to prevent crash 132
+  if event == "PLAYER_LOGOUT" then
+    this:UnregisterAllEvents()
+    this:SetScript("OnEvent", nil)
+    return
+  end
+  
   if event == "CHAT_MSG_ADDON" and (arg1 == "HealComm" or arg1 == "CTRA") then
     this:ParseChatMessage(arg4, arg2, arg1)
   elseif event == "UNIT_HEALTH" then
