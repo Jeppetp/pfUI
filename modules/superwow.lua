@@ -302,7 +302,14 @@ pfUI:RegisterModule("superwow", "vanilla", function ()
     playerMana:RegisterEvent("UNIT_MAXMANA")
     playerMana:RegisterEvent("UNIT_DISPLAYPOWER")
     playerMana:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+    playerMana:RegisterEvent("PLAYER_LOGOUT")
     playerMana:SetScript("OnEvent", function()
+      -- Handle shutdown to prevent crash 132
+      if event == "PLAYER_LOGOUT" then
+        this:UnregisterAllEvents()
+        this:SetScript("OnEvent", nil)
+        return
+      end
       if arg1 == nil or arg1 == "player" then
         UpdatePlayerSecondaryMana()
       end
@@ -459,7 +466,14 @@ pfUI:RegisterModule("superwow", "vanilla", function ()
     targetMana:RegisterEvent("UNIT_MANA")
     targetMana:RegisterEvent("UNIT_MAXMANA")
     targetMana:RegisterEvent("UNIT_DISPLAYPOWER")
+    targetMana:RegisterEvent("PLAYER_LOGOUT")
     targetMana:SetScript("OnEvent", function()
+      -- Handle shutdown to prevent crash 132
+      if event == "PLAYER_LOGOUT" then
+        this:UnregisterAllEvents()
+        this:SetScript("OnEvent", nil)
+        return
+      end
       if event == "PLAYER_TARGET_CHANGED" then
         UpdateTargetSecondaryMana()
       elseif arg1 == "target" then
@@ -535,8 +549,16 @@ pfUI:RegisterModule("superwow", "vanilla", function ()
     trackFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")
     trackFrame:RegisterEvent("RAID_ROSTER_UPDATE")
     trackFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    trackFrame:RegisterEvent("PLAYER_LOGOUT")
 
     trackFrame:SetScript("OnEvent", function()
+      -- Handle shutdown to prevent crash 132
+      if event == "PLAYER_LOGOUT" then
+        this:UnregisterAllEvents()
+        this:SetScript("OnEvent", nil)
+        return
+      end
+
       -- Track party members
       for i = 1, 4 do
         local unit = "party" .. i
@@ -706,7 +728,15 @@ pfUI:RegisterModule("superwow", "vanilla", function ()
 
   supercast:RegisterEvent("PLAYER_ENTERING_WORLD")
   supercast:RegisterEvent("UNIT_CASTEVENT")
+  supercast:RegisterEvent("PLAYER_LOGOUT")
   supercast:SetScript("OnEvent", function()
+    -- Handle shutdown to prevent crash 132
+    if event == "PLAYER_LOGOUT" then
+      this:UnregisterAllEvents()
+      this:SetScript("OnEvent", nil)
+      return
+    end
+
     if event == "PLAYER_ENTERING_WORLD" then
       -- Cache player GUID
       if UnitExists then
