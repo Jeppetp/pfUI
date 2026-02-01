@@ -685,8 +685,9 @@ nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
             guidRegistry[guid] = nil
           end
           
-          -- Clean CastEvents cache
-          if CastEvents[guid] then
+          -- Clean CastEvents cache ONLY if cast has expired
+          -- (Don't delete active casts just because plate was hidden briefly)
+          if CastEvents[guid] and CastEvents[guid].endTime and CastEvents[guid].endTime < frameState.now then
             CastEvents[guid] = nil
           end
           
