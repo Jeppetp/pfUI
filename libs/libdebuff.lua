@@ -150,6 +150,10 @@ local allAuraCasts = pfUI.libdebuff_all_auras
 pfUI.libdebuff_pending = pfUI.libdebuff_pending or {}
 local pendingCasts = pfUI.libdebuff_pending
 
+-- Track recent DEBUFF_REMOVED events to suppress unnecessary rescans
+pfUI.libdebuff_recent_removals = pfUI.libdebuff_recent_removals or {}
+local recentRemovals = pfUI.libdebuff_recent_removals
+
 -- Cleveroids API: [targetGUID][spellID] = {start, duration, caster, stacks}
 pfUI.libdebuff_objects_guid = pfUI.libdebuff_objects_guid or {}
 local objectsByGuid = pfUI.libdebuff_objects_guid
@@ -280,7 +284,8 @@ local function ShiftSlotsDown(guid, removedSlot)
   if debugStats.enabled then
     debugStats.shift_down = debugStats.shift_down + 1
     if IsCurrentTarget(guid) then
-      DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[SHIFT DOWN]|r target=%s starting at slot %d", DebugGuid(guid), removedSlot))
+      DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[SHIFT DOWN]|r target=%s removed slot %d, shifting slots %d+ down", 
+        DebugGuid(guid), removedSlot, removedSlot + 1))
     end
   end
   
@@ -462,10 +467,16 @@ end
 local function InitializeTargetSlots(guid)
   if not guid or not GetUnitField or not SpellInfo then return end
   
+  -- Save old slot data — needed to recover casterGuid for spells that never
+  -- went through AURA_CAST (e.g. Pain Spike, Deep Wound on some servers).
+  -- InitializeTargetSlots only looks up casters from allAuraCasts, which won't
+  -- have entries for those spells. But DEBUFF_ADDED already filled the real caster.
+  local oldSlots = allSlots[guid]
+  
   -- Clear existing slots for this target
   allSlots[guid] = {}
   
-  if debugStats.enabled then
+  if debugStats.enabled and IsCurrentTarget(guid) then
     DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[INITIAL SCAN]|r Scanning target=%s", GetDebugTimestamp(), DebugGuid(guid)))
   end
   
@@ -475,13 +486,17 @@ local function InitializeTargetSlots(guid)
   -- Get all auras (buffs + debuffs) for this unit
   local auras = GetUnitField(guid, "aura")
   if not auras then 
-    if debugStats.enabled then
+    if debugStats.enabled and IsCurrentTarget(guid) then
       DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[INITIAL SCAN]|r GetUnitField failed!")
     end
     return 
   end
   
-  -- Scan debuff slots only (aura slots 33-48 = debuff slots 1-16)
+  -- Scan debuff slots only (aura slots 33-48)
+  -- IMPORTANT: UnitDebuff() returns compacted slots (1, 2, 3... no gaps)
+  -- GetUnitField returns raw aura slots which CAN have gaps (e.g. 33, 35, 36)
+  -- We must use a counter here to match UnitDebuff's compacted numbering
+  local debuffSlot = 0
   for auraSlot = 33, 48 do
     local spellId = auras[auraSlot]
     
@@ -491,9 +506,7 @@ local function InitializeTargetSlots(guid)
       
       if spellName and spellName ~= "" then
         slotCount = slotCount + 1
-        
-        -- Convert aura slot (33-48) to debuff slot (1-16)
-        local debuffSlot = auraSlot - 32
+        debuffSlot = debuffSlot + 1
         
         -- Check if this is our debuff
         local isOurs = false
@@ -527,7 +540,22 @@ local function InitializeTargetSlots(guid)
           isOurs = isOurs
         }
         
-        if debugStats.enabled then
+        -- Merge back caster info from previous allSlots data.
+        -- Spells like Pain Spike never produce AURA_CAST, so allAuraCasts has no entry.
+        -- But a prior DEBUFF_ADDED may have filled the real caster — recover it.
+        if casterGuid == nil and oldSlots then
+          for _, oldData in pairs(oldSlots) do
+            if oldData.spellName == spellName and oldData.casterGuid then
+              allSlots[guid][debuffSlot].casterGuid = oldData.casterGuid
+              allSlots[guid][debuffSlot].isOurs = oldData.isOurs
+              casterGuid = oldData.casterGuid  -- update for the debug log below
+              isOurs = oldData.isOurs
+              break
+            end
+          end
+        end
+        
+        if debugStats.enabled and IsCurrentTarget(guid) then
           DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[SLOT INIT]|r slot=%d %s (ID=%d) isOurs=%s caster=%s", 
             debuffSlot, spellName, spellId, tostring(isOurs), DebugGuid(casterGuid)))
         end
@@ -535,7 +563,7 @@ local function InitializeTargetSlots(guid)
     end
   end
   
-  if debugStats.enabled then
+  if debugStats.enabled and IsCurrentTarget(guid) then
     DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ffff[INITIAL SCAN DONE]|r Found %d debuff slots", GetDebugTimestamp(), slotCount))
   end
 end
@@ -650,7 +678,7 @@ local function CleanupOutOfRangeUnits()
     end
   end
   
-  if debugStats.enabled and cleanedCount > 0 then
+  if debugStats.enabled and cleanedCount > 0 and false then
     DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[PERIODIC CLEANUP]|r Cleaned %d units (dead or out of range)", cleanedCount))
   end
   
@@ -1100,6 +1128,10 @@ pfUI.libdebuff_lastlog = pfUI.libdebuff_lastlog or {}
 local lastUnitDebuffLog = pfUI.libdebuff_lastlog
 local UNITDEBUFF_LOG_THROTTLE = 5 -- seconds
 
+-- Throttle for missing-slot rescans (per guid, max once per second)
+local lastRescanTime = {}
+local RESCAN_THROTTLE = 1 -- seconds
+
 function libdebuff:UnitDebuff(unit, id)
   local unitname = UnitName(unit)
   local unitlevel = UnitLevel(unit)
@@ -1120,7 +1152,7 @@ function libdebuff:UnitDebuff(unit, id)
     
     -- EMERGENCY SCAN: If allSlots is empty but debuff exists, trigger scan
     if guid and not allSlots[guid] and GetUnitField and SpellInfo then
-      if debugStats.enabled then
+      if debugStats.enabled and IsCurrentTarget(guid) then
         DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[EMERGENCY SCAN]|r allSlots empty for %s but debuff exists - triggering scan", DebugGuid(guid)))
       end
       InitializeTargetSlots(guid)
@@ -1160,25 +1192,75 @@ function libdebuff:UnitDebuff(unit, id)
       end
       
       -- Verify spell name matches (safety check)
+      -- Smart approach: Only trigger cleanup if the mismatch is due to a MISSING event
+      -- (i.e., debuff expired but DEBUFF_REMOVED never fired)
       if spellName ~= effect then
-        -- MISMATCH detected! Slot-shifting happened, trigger re-scan
-        if debugStats.enabled and IsCurrentTarget(guid) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[SLOT MISMATCH]|r slot=%d allSlots='%s' but UnitDebuff='%s' - triggering re-scan", 
-            id, spellName, effect))
+        -- MISMATCH detected!
+        -- Check if the debuff in allSlots has expired (missing DEBUFF_REMOVED event)
+        
+        local shouldCleanup = false
+        local expiredSpellName = nil
+        
+        if allSlots[guid][id] then
+          local slotData = allSlots[guid][id]
+          local slotSpellName = slotData.spellName
+          local slotCasterGuid = slotData.casterGuid
+          local slotIsOurs = slotData.isOurs
+          
+          -- Check if this debuff has expired
+          local timeleft = nil
+          
+          if slotIsOurs and ownDebuffs[guid] and ownDebuffs[guid][slotSpellName] then
+            local data = ownDebuffs[guid][slotSpellName]
+            timeleft = (data.startTime + data.duration) - GetTime()
+          elseif not slotIsOurs and slotCasterGuid and allAuraCasts[guid] and allAuraCasts[guid][slotSpellName] and allAuraCasts[guid][slotSpellName][slotCasterGuid] then
+            local data = allAuraCasts[guid][slotSpellName][slotCasterGuid]
+            timeleft = (data.startTime + data.duration) - GetTime()
+          end
+          
+          -- If expired for more than 0.5s, the DEBUFF_REMOVED event is missing
+          if timeleft and timeleft < -0.5 then
+            shouldCleanup = true
+            expiredSpellName = slotSpellName
+          end
         end
         
-        -- Trigger re-scan to sync allSlots with reality
-        InitializeTargetSlots(guid)
-        
-        -- Retry after re-scan
-        if allSlots[guid] and allSlots[guid][id] then
-          slotData = allSlots[guid][id]
-          spellName = slotData.spellName
-          isOurs = slotData.isOurs
-          
+        if shouldCleanup then
+          -- MISSING EVENT detected - force cleanup
           if debugStats.enabled and IsCurrentTarget(guid) then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[RESCAN OK]|r slot=%d now shows '%s'", id, spellName))
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[MISSING DEBUFF_REMOVED]|r slot=%d %s expired but event never fired - forcing cleanup", 
+              id, expiredSpellName))
           end
+          
+          -- Simulate the missing event
+          local slotData = allSlots[guid][id]
+          local slotIsOurs = slotData.isOurs
+          
+          allSlots[guid][id] = nil
+          if slotIsOurs then
+            if ownSlots[guid] then ownSlots[guid][id] = nil end
+            if ownDebuffs[guid] then ownDebuffs[guid][expiredSpellName] = nil end
+          end
+          
+          -- Shift slots
+          ShiftSlotsDown(guid, id)
+          
+          -- Retry
+          if allSlots[guid] and allSlots[guid][id] then
+            slotData = allSlots[guid][id]
+            spellName = slotData.spellName
+            isOurs = slotData.isOurs
+            
+            if debugStats.enabled and IsCurrentTarget(guid) then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[CLEANUP OK]|r slot=%d now shows '%s'", id, spellName))
+            end
+          end
+        else
+          -- Transient mismatch - DEBUFF_REMOVED event is pending
+          -- This is normal during the brief window between client-side removal
+          -- and server event arrival - just return nil and wait
+          -- (No logging needed - this happens all the time and is expected)
+          return nil
         end
       end
       
@@ -1274,10 +1356,17 @@ function libdebuff:UnitDebuff(unit, id)
       -- Found timer data in allSlots - return early
       return effect, rank, texture, stacks, dtype, duration, timeleft, caster
     else
-      -- FIX #5: allSlots is empty - fall through to libdebuff.objects
-      if debugStats.enabled and IsCurrentTarget(guid) then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[ALLSLOTS EMPTY]|r slot=%d effect=%s - falling back to libdebuff.objects", 
-          id, tostring(effect)))
+      -- allSlots exists but this slot is missing — trigger a throttled rescan
+      -- (happens when debuff was pre-existing before target acquired, DEBUFF_ADDED never fired)
+      if guid and GetUnitField and SpellInfo then
+        local now = GetTime()
+        if not lastRescanTime[guid] or (now - lastRescanTime[guid]) > RESCAN_THROTTLE then
+          lastRescanTime[guid] = now
+          if debugStats.enabled and IsCurrentTarget(guid) then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[ALLSLOTS MISSING]|r slot=%d effect=%s - triggering rescan", id, tostring(effect)))
+          end
+          InitializeTargetSlots(guid)
+        end
       end
     end
   end
@@ -1942,19 +2031,32 @@ if hasNampower then
         end
       end
       
-      -- ALWAYS shift if ANY slot >= this slot exists
+      -- Shift up if slot is occupied — but NOT if it's the same spell/caster already
+      -- (happens when InitializeTargetSlots already filled the slot, or on stack updates)
       allSlots[guid] = allSlots[guid] or {}
       ownSlots[guid] = ownSlots[guid] or {}
       
-      local needsShift = false
-      for existingSlot in pairs(allSlots[guid]) do
-        if existingSlot >= slot then
-          needsShift = true
-          break
+      local isDuplicate = false
+      if allSlots[guid][slot] then
+        local existing = allSlots[guid][slot]
+        -- Same spell + same caster → exact duplicate (stack update or post-InitializeTargetSlots)
+        -- Same spell + existing caster is nil → rescan placeholder, DEBUFF_ADDED fills the real caster
+        if existing.spellName == spellName and (existing.casterGuid == casterGuid or existing.casterGuid == nil) then
+          isDuplicate = true
         end
       end
-      if needsShift then
-        ShiftSlotsUp(guid, slot)
+      
+      if not isDuplicate then
+        local needsShift = false
+        for existingSlot in pairs(allSlots[guid]) do
+          if existingSlot >= slot then
+            needsShift = true
+            break
+          end
+        end
+        if needsShift then
+          ShiftSlotsUp(guid, slot)
+        end
       end
       
       -- ✅ RANK PROTECTION: Check if same spell + same caster with higher rank already in this slot
@@ -2028,6 +2130,12 @@ if hasNampower then
       
       local spellName = SpellInfo and SpellInfo(spellId) or "?"
       
+      -- ALWAYS log the event when debugging
+      if debugStats.enabled and IsCurrentTarget(guid) then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff9900[DEBUFF_REMOVED_OTHER EVENT]|r slot=%d %s target=%s", 
+          GetDebugTimestamp(), slot, spellName, DebugGuid(guid)))
+      end
+      
       -- If unit is dead, cleanup and skip processing (defensive fallback)
       if UnitIsDead and UnitIsDead(guid) then
         CleanupUnit(guid)
@@ -2060,15 +2168,32 @@ if hasNampower then
         local removedCasterGuid = slotData.casterGuid
         local removedSpellName = slotData.spellName  -- Use slotData for consistency
         
-        if debugStats.enabled and IsCurrentTarget(guid) then
-          -- Show both names if they differ
-          if removedSpellName ~= spellName then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[DEBUFF_REMOVED]|r slot=%d %s(scan=%s) target=%s caster=%s |cffff0000MISMATCH!|r", 
-              GetDebugTimestamp(), slot, removedSpellName, spellName, DebugGuid(guid), DebugGuid(removedCasterGuid)))
-          else
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[DEBUFF_REMOVED]|r slot=%d %s target=%s caster=%s", 
-              GetDebugTimestamp(), slot, spellName, DebugGuid(guid), DebugGuid(removedCasterGuid)))
+        -- STALE EVENT CHECK: If the event's spell doesn't match what's in the slot,
+        -- a rescan already compacted the slots. This event is for a debuff that's
+        -- already gone — don't touch the current slot data.
+        if removedSpellName ~= spellName then
+          if debugStats.enabled and IsCurrentTarget(guid) then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00ff[DEBUFF_REMOVED STALE]|r slot=%d event=%s but slot has %s - skipping", 
+              GetDebugTimestamp(), slot, spellName, removedSpellName))
           end
+          -- Still shift down and cleanup, but don't touch allSlots or allAuraCasts
+          if debugStats.enabled then
+            if wasOurs then
+              debugStats.debuff_removed_ours = debugStats.debuff_removed_ours + 1
+            else
+              debugStats.debuff_removed_other = debugStats.debuff_removed_other + 1
+            end
+          end
+          CleanupOrphanedDebuffs(guid)
+          if pfUI.nameplates and pfUI.nameplates.OnAuraUpdate then
+            pfUI.nameplates:OnAuraUpdate(guid)
+          end
+          return
+        end
+        
+        if debugStats.enabled and IsCurrentTarget(guid) then
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[DEBUFF_REMOVED]|r slot=%d %s target=%s caster=%s", 
+            GetDebugTimestamp(), slot, spellName, DebugGuid(guid), DebugGuid(removedCasterGuid)))
         end
         
         -- Also remove from allAuraCasts - use removedSpellName from slotData!
@@ -2111,6 +2236,12 @@ if hasNampower then
         end
         
         allSlots[guid][slot] = nil
+      else
+        -- Slot is already empty - log this!
+        if debugStats.enabled and IsCurrentTarget(guid) then
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[DEBUFF_REMOVED SLOT EMPTY]|r slot=%d %s already removed (probably by rescan)", 
+            GetDebugTimestamp(), slot, spellName))
+        end
       end
       
       if debugStats.enabled then
@@ -2123,6 +2254,9 @@ if hasNampower then
       
       -- ALWAYS shift down (affects all slots)
       ShiftSlotsDown(guid, slot)
+      
+      -- Mark this GUID as having recent removal (suppress rescans for 0.5s)
+      recentRemovals[guid] = GetTime()
       
       -- Cleanup
       CleanupOrphanedDebuffs(guid)
@@ -2320,12 +2454,12 @@ _G.SlashCmdList["SHIFTTEST"] = function(msg)
   
   if msg == "start" then
     debugStats.enabled = true
-    debugStats.trackAllUnits = true  -- Always track all units
+    debugStats.trackAllUnits = false
     -- Reset stats
     for k in pairs(debugStats) do
       if k ~= "enabled" and k ~= "trackAllUnits" then debugStats[k] = 0 end
     end
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[ShiftTest]|r Tracking STARTED (ALL UNITS)")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[ShiftTest]|r Tracking STARTED (current target only)")
     
   elseif msg == "stop" then
     debugStats.enabled = false
