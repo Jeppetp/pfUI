@@ -1346,7 +1346,10 @@ function libdebuff:UnitOwnDebuff(unit, id)
         local timeleft = (data.startTime + data.duration) - GetTime()
         
         -- Grace period: keep debuff visible for 1s after expiry to prevent flicker
-        if timeleft > -1 then
+        -- IMMUNITY CHECK: Only show if slot is set (confirmed by DEBUFF_ADDED_OTHER)
+        -- This prevents showing timers for spells like Rake where the bleed is immune
+        -- (AURA_CAST fires but DEBUFF_ADDED never fires = slot stays nil)
+        if data.slot and timeleft > -1 then
           cache[spellName] = true
           if count == id then
             local texture = data.texture or "Interface\\Icons\\Spell_Shadow_CurseOfTongues"
