@@ -57,9 +57,15 @@ local function BuffOnUpdate()
   local texture = GetPlayerBuffTexture(bid)
   local start = 0
 
+  -- slot is empty (buff expired or doesn't exist), clear timer and bail
+  if not texture then
+    CooldownFrame_SetTimer(this.cd, 0, 0, 0)
+    return
+  end
+
   -- Get buff name for unique key (two buffs could share same texture)
   local name = ""
-  if texture and libtipscan then
+  if libtipscan then
     scanner = scanner or libtipscan:GetScanner("unitframes")
     if scanner then
       scanner:SetPlayerBuff(bid)
@@ -155,9 +161,15 @@ local function DebuffOnUpdate()
   local texture = GetPlayerBuffTexture(bid)
   local start = 0
 
+  -- slot is empty (debuff expired or doesn't exist), clear timer and bail
+  if not texture then
+    CooldownFrame_SetTimer(this.cd, 0, 0, 0)
+    return
+  end
+
   -- Get debuff name for unique key (two debuffs could share same texture)
   local name = ""
-  if texture and libtipscan then
+  if libtipscan then
     scanner = scanner or libtipscan:GetScanner("unitframes")
     if scanner then
       scanner:SetPlayerBuff(bid)
