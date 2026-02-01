@@ -1242,8 +1242,8 @@ pfUI:RegisterModule("actionbar", "vanilla", function ()
     f.count:SetJustifyH("RIGHT")
     f.count:SetJustifyV("BOTTOM")
 
-    -- macro spell scan
-    if C.bars.macroscan == "0" then
+    -- macro spell scan (disabled when macro addons are loaded)
+    if C.bars.macroscan == "0" or pfUI:MacroAddonsLoaded() then
       f.scanmacro, f.spellslot, f.booktype = nil, nil, nil
     else
       f.scanmacro = true
