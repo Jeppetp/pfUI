@@ -393,6 +393,7 @@ function pfUI.uf.glow.UpdateGlowAnimation()
 end
 
 local detect_icon, detect_name
+local buff_icons_seeded = false
 function pfUI.uf:DetectBuff(name, id)
   if not name or not id then return end
 
@@ -409,6 +410,17 @@ function pfUI.uf:DetectBuff(name, id)
 
   -- make sure the icon cache exists
   pfUI_cache.buff_icons = pfUI_cache.buff_icons or {}
+
+  -- seed cache from static locale data once per login
+  -- reverses L["icons"] (name→icon) into buff_icons (icon→name)
+  -- so that pfUI_cache.buff_icons[detect_icon] hits for all known buffs immediately
+  if not buff_icons_seeded then
+    for name, icon in pairs(L["icons"]) do
+      local path = "Interface\\Icons\\" .. icon
+      pfUI_cache.buff_icons[path] = pfUI_cache.buff_icons[path] or name
+    end
+    buff_icons_seeded = true
+  end
 
   -- check the regular way
   detect_icon = UnitBuff(name, id)
