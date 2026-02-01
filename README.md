@@ -1,6 +1,6 @@
 # pfUI - Turtle WoW Enhanced Edition (Experiment Branch)
 
-[![Version](https://img.shields.io/badge/version-7.4.1--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
+[![Version](https://img.shields.io/badge/version-7.5.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
 [![Turtle WoW](https://img.shields.io/badge/Turtle%20WoW-1.18.0-brightgreen.svg)](https://turtlecraft.gg/)
 [![SuperWoW](https://img.shields.io/badge/SuperWoW-REQUIRED-purple.svg)](https://github.com/balakethelock/SuperWoW)
 [![Nampower](https://img.shields.io/badge/Nampower-REQUIRED-yellow.svg)](https://gitea.com/avitasia/nampower)
@@ -34,6 +34,165 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 - ✅ You want a stable, battle-tested build
 - ✅ You don't have Nampower
 - ✅ You prefer reliability over bleeding-edge features
+
+---
+
+## 🎯 What's New in Version 7.5.0 (January 31, 2026)
+
+### 🔧 Player Buff Bar Timer Fix (buffwatch.lua)
+
+**Fixed buff timers resetting on Player Buff/Debuff Bars when other buffs expire:**
+
+Previously, buff bar timers would reset or jump when other buffs expired because the UUID (unique identifier) included the slot number. Since slots shift when buffs expire, the same buff would get a new UUID, causing the timer bar to think it's a new buff.
+
+**The Problem:**
+- Old UUID: `texture + name + slot` (e.g., "PowerWordFortitude_tex_PWF_3")
+- Buff in slot 3 expires → slots 4,5,6 shift down to 3,4,5
+- UUID changes from `..._4` to `..._3` → timer resets!
+
+**The Solution:**
+- Player buffs now use: `texture + name` only (no slot)
+- Target debuffs still use: `texture + name + slot` (needed for multi-caster scenarios)
+
+```lua
+-- For player: no slot in uuid (slots shift when other buffs expire)
+-- For target: include slot (multiple players can have same debuff)
+local uuid
+if frame.unit == "player" then
+  uuid = data[4] .. data[3] -- texture + name only
+else
+  uuid = data[4] .. data[3] .. data[2] -- texture + name + slot
+end
+```
+
+### 🛡️ Immunity Check for Debuff Timers (libdebuff.lua)
+
+**No more phantom timers for immune targets:**
+
+When a target is immune to your debuff (e.g., Rake bleed on a bleed-immune mob), the `AURA_CAST` event fires but `DEBUFF_ADDED` never comes. Previously this could create a timer with icon for a debuff that was never actually applied.
+
+**The Fix:**
+- Debuff data now requires `slot` to be set (confirmed by `DEBUFF_ADDED_OTHER` event)
+- If `AURA_CAST` fires but `DEBUFF_ADDED` never comes → `slot` stays `nil` → no timer/icon shown
+
+```lua
+-- IMMUNITY CHECK: Only show if slot is set (confirmed by DEBUFF_ADDED_OTHER)
+-- This prevents showing timers for spells like Rake where the bleed is immune
+if data.slot and timeleft > -1 then
+  -- Show the debuff
+end
+```
+
+### 🎯 UnitDebuff() Now Returns Caster Information (libdebuff.lua)
+
+**Enhanced UnitDebuff() API - 8th return value is now `caster`:**
+
+```lua
+local name, rank, texture, stacks, dtype, duration, timeleft, caster = libdebuff:UnitDebuff(unit, id)
+-- caster = "player" (your debuff), "other" (someone else's), or nil (unknown)
+```
+
+**Use Cases:**
+- Buff bar tooltip can now find correct slot for "only own debuffs" mode
+- UI can differentiate between your debuffs and others' debuffs
+- Enables future features like "show only my debuffs" filters
+
+### 🔄 Buff Bar Tooltip Fix for "Only Own Debuffs" Mode (buffwatch.lua)
+
+**Fixed tooltip showing wrong debuff in "only own debuffs" mode:**
+
+When using the "Show only own debuffs" option on Target Debuff Bars, hovering over a debuff could show the wrong tooltip because the displayed slot didn't match the actual game slot. Now searches through all game slots to find the correct one by matching spell name AND caster.
+
+### 🔧 Lua 5.0 Local Variable Limit Workaround (libdebuff.lua)
+
+**Fixed addon failing to load due to Lua 5.0's 32 local variable limit:**
+
+Lua 5.0 (used by WoW 1.12) has a hard limit of 32 local variables per function scope. As libdebuff grew, it hit this limit and stopped loading entirely.
+
+**The Solution:** Moved 11 tables from local scope to `pfUI.` namespace:
+
+| Old (local) | New (pfUI. namespace) |
+|-------------|----------------------|
+| `ownDebuffs` | `pfUI.libdebuff_own` |
+| `ownSlots` | `pfUI.libdebuff_own_slots` |
+| `allSlots` | `pfUI.libdebuff_all_slots` |
+| `allAuraCasts` | `pfUI.libdebuff_all_auras` |
+| `pendingCasts` | `pfUI.libdebuff_pending` |
+| `objectsByGuid` | `pfUI.libdebuff_objects_guid` |
+| `debugStats` | `pfUI.libdebuff_debugstats` |
+| `lastCastRanks` | `pfUI.libdebuff_lastranks` |
+| `lastFailedSpells` | `pfUI.libdebuff_lastfailed` |
+| `lastUnitDebuffLog` | `pfUI.libdebuff_lastlog` |
+| `cache` | `pfUI.libdebuff_cache` |
+
+### 🛑 Crash 132 Fix (Credits: jrc13245)
+
+**Fixed client crash (Error 132) when logging out:**
+
+WoW crashes with Error 132 when addons make API calls like `UnitExists()` during shutdown, especially with UnitXP DLL installed.
+
+**The Fix:** Register `PLAYER_LOGOUT` event and immediately disable all event handling:
+
+```lua
+frame:RegisterEvent("PLAYER_LOGOUT")
+frame:SetScript("OnEvent", function()
+  if event == "PLAYER_LOGOUT" then
+    this:UnregisterAllEvents()
+    this:SetScript("OnEvent", nil)
+    return
+  end
+  -- ... rest of event handling
+end)
+```
+
+**Applied to:**
+- `libdebuff.lua` - All event frames
+- `nameplates.lua` - nameplates + nameplates.combat frames
+- `nampower.lua` - Spell queue indicator frame
+- `superwow.lua` - Secondary mana bar frames
+- `actionbar.lua` - Page switch frame
+
+### ⚡ Performance Micro-Optimizations
+
+**Various small performance improvements across the codebase:**
+
+| Optimization | Location | Benefit |
+|-------------|----------|---------|
+| `childs` table reuse | nameplates.lua | Avoids creating new table every scan cycle |
+| Indexed access instead of `pairs()` | nameplates.lua | Faster debuff timeout scanning |
+| Quick exit if not in combat | nameplates.lua | Skips threatcolor calculation when unnecessary |
+| Player GUID caching | libdebuff.lua | Avoids repeated `UnitExists("player")` calls |
+| Consistent DoNothing() pattern | unitframes.lua, nameplates.lua | Lightweight frames when animation disabled |
+
+### 📋 Complete libdebuff.lua Feature Summary
+
+For reference, here's everything the enhanced libdebuff system now provides:
+
+**Debuff Detection:**
+- ✅ Checks for dodges, misses, resists, parries, immunes, reflects, and evades
+- ✅ Immunity check - no timer if debuff wasn't actually applied
+- ✅ Tracks if debuff is from YOU or from OTHERS (including their GUID)
+
+**Rank & Duration:**
+- ✅ Rank protection - lower rank spells can't refresh higher rank timers
+- ✅ Shared debuff logic (`uniqueDebuffs` and `debuffOverwritePairs`)
+- ✅ Faerie Fire ↔ Faerie Fire (Feral), Demo Shout ↔ Demo Roar overwrites (with rank check!)
+- ✅ Combo point finisher duration (Rip, Rupture, Kidney Shot)
+- ✅ Talent-based duration modifiers (Booming Voice, Improved SW:P, etc.)
+
+**Tracking:**
+- ✅ Multi-target debuff tracking via GUID
+- ✅ Debuff stack tracking for stackable debuffs
+- ✅ Handles dispels and removals via events
+
+**API:**
+- ✅ `UnitDebuff()` returns: name, rank, texture, stacks, dtype, duration, timeleft, caster
+- ✅ `UnitOwnDebuff()` for filtering only your own debuffs
+- ✅ Cleveroids API compatibility via `objectsByGuid`
+
+**Debug Commands:**
+- `/shifttest start/stop/stats/slots` - Debug debuff slot tracking
+- `/memcheck` - Show memory usage statistics
 
 ---
 
@@ -514,7 +673,19 @@ Master uses **none** of these - it relies on:
 
 ## 📋 File Changes Summary
 
-### Version 7.4.0
+### Version 7.5.0
+
+| File | Location | Changes |
+|------|----------|---------|
+| `buffwatch.lua` | `modules/` | Player buff bar timer fix (UUID without slot), tooltip fix for "only own debuffs" mode |
+| `libdebuff.lua` | `libs/` | Immunity check, UnitDebuff() 8th return value `caster`, Lua 5.0 table limit workaround (11 tables to pfUI. namespace), Crash 132 fix, Player GUID caching |
+| `unitframes.lua` | `api/` | Consistent DoNothing() pattern for lightweight cooldown frames |
+| `nameplates.lua` | `modules/` | Consistent DoNothing() pattern, `childs` table reuse, indexed debuff timeout scan, quick exit optimization, Crash 132 fix |
+| `nampower.lua` | `modules/` | Crash 132 fix |
+| `superwow.lua` | `modules/` | Crash 132 fix |
+| `actionbar.lua` | `modules/` | Crash 132 fix |
+
+### Version 7.4.3 (January 29, 2026)
 
 | File | Location | Changes |
 |------|----------|---------|
@@ -590,7 +761,27 @@ If `nil`, Nampower is not installed correctly!
 
 ## 📜 Changelog
 
-### 7.4.0 (January 26, 2026)
+### 7.5.0 (January 31, 2026)
+
+**Added:**
+- ✅ UnitDebuff() 8th return value: `caster` ("player"/"other"/nil)
+- ✅ Immunity check - no timer/icon shown if debuff wasn't actually applied
+- ✅ Buff bar tooltip correctly identifies debuff slot in "only own debuffs" mode
+- ✅ `/shifttest` and `/memcheck` debug commands for libdebuff troubleshooting
+
+**Fixed:**
+- 🔧 Player Buff Bar timer reset bug (UUID no longer includes slot for player buffs)
+- 🔧 Lua 5.0 local variable limit (moved 11 tables to pfUI. namespace)
+- 🔧 Crash 132 on logout (Credits: jrc13245) - affects libdebuff, nameplates, nampower, superwow, actionbar
+- 🔧 Consistent DoNothing() pattern across all cooldown frame creation
+
+**Performance:**
+- ⚡ `childs` table reuse in nameplate scanner (avoids GC churn)
+- ⚡ Indexed access instead of `pairs()` for debuff timeout scanning
+- ⚡ Quick exit if not in combat for threatcolor calculation
+- ⚡ Player GUID caching in libdebuff
+
+### 7.4.3 (January 29, 2026)
 
 **Added:**
 - ✅ Castbar Timer Decimals setting (1 or 2 decimals)
@@ -683,11 +874,12 @@ Same as original pfUI: GNU General Public License v3.0
 **Original pfUI:** Shagu (https://github.com/shagu/pfUI)
 **Master Fork:** me0wg4ming
 **Experiment Development:** me0wg4ming + AI collaboration
+**Crash 132 Fix:** jrc13245
 **Nampower:** Avitasia
 **SuperWoW:** Balake
 **Testing:** Turtle WoW community
 
 ---
 
-*Last Updated: January 27, 2026*
-*Version: 7.4.1-experimental*
+*Last Updated: January 31, 2026*
+*Version: 7.5.0-experimental*
