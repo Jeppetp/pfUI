@@ -109,6 +109,9 @@ local function BuffOnEnter()
   if IsShiftKeyDown() then
     local texture = parent.label == "player" and GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL")) or UnitBuff(parent.label .. parent.id, this.id)
 
+    -- slot is empty, nothing to compare against
+    if not texture then return end
+
     local playerlist = ""
     local first = true
 
@@ -410,7 +413,7 @@ function pfUI.uf:DetectBuff(name, id)
   -- check the regular way
   detect_icon = UnitBuff(name, id)
   if detect_icon then
-    if not L["icons"][detect_name] and not pfUI_cache.buff_icons[detect_icon] then
+    if not pfUI_cache.buff_icons[detect_icon] then
       -- read buff name and cache it
       scanner:SetUnitBuff(name, id)
       detect_name = scanner:Line(1)
