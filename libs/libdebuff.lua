@@ -531,6 +531,17 @@ local function InitializeTargetSlots(guid)
               end
             end
           end
+          
+          -- Also check pendingCasts (from UNIT_CASTEVENT) for spells without AURA_CAST
+          if not casterGuid and pendingCasts[guid] and pendingCasts[guid][spellName] then
+            local pending = pendingCasts[guid][spellName]
+            if GetTime() - pending.time < 1 then
+              casterGuid = pending.casterGuid
+              if casterGuid == myGuid then
+                isOurs = true
+              end
+            end
+          end
         end
         
         -- Add to allSlots (using debuff slot numbering)
@@ -2114,6 +2125,27 @@ if hasNampower then
         -- Safety: only set slot if entry exists in ownDebuffs
         if ownDebuffs[guid] and ownDebuffs[guid][spellName] then
           ownDebuffs[guid][spellName].slot = slot
+        end
+      end
+      
+      -- Also store in allAuraCasts for spells without AURA_CAST event (e.g. Pain Spike)
+      -- This ensures InitializeTargetSlots can find the caster on future rescans
+      if casterGuid and casterGuid ~= "" and casterGuid ~= "0x0000000000000000" then
+        allAuraCasts[guid] = allAuraCasts[guid] or {}
+        if not allAuraCasts[guid][spellName] or not allAuraCasts[guid][spellName][casterGuid] then
+          allAuraCasts[guid][spellName] = allAuraCasts[guid][spellName] or {}
+          -- Only add if not already present (don't overwrite AURA_CAST data which has duration)
+          if not allAuraCasts[guid][spellName][casterGuid] then
+            allAuraCasts[guid][spellName][casterGuid] = {
+              startTime = GetTime(),
+              duration = 0,  -- Unknown duration for spells without AURA_CAST
+              rank = 0
+            }
+            if debugStats.enabled and IsCurrentTarget(guid) then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[AURACAST FALLBACK]|r %s caster=%s added to allAuraCasts (no AURA_CAST event)", 
+                spellName, DebugGuid(casterGuid)))
+            end
+          end
         end
       end
       
