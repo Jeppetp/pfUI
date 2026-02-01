@@ -2041,7 +2041,9 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
       CreateConfig(U["bars"], T["Button Animation"], C.bars, "animation", "dropdown", pfUI.gui.dropdowns.actionbuttonanimations)
       CreateConfig(U["bars"], T["Button Animation Trigger"], C.bars, "animmode", "dropdown", pfUI.gui.dropdowns.animationmode)
       CreateConfig(U["bars"], T["Show Animation On Hidden Bars"], C.bars, "animalways", "checkbox")
-      CreateConfig(U["bars"], T["Scan Macros For Spells"], C.bars, "macroscan", "checkbox", nil, nil, nil, nil, "vanilla")
+      if not pfUI:MacroAddonsLoaded() then
+        CreateConfig(U["bars"], T["Scan Macros For Spells"], C.bars, "macroscan", "checkbox", nil, nil, nil, nil, "vanilla")
+      end
       CreateConfig(U["bars"], T["Show Reagent Count"], C.bars, "reagents", "checkbox")
       CreateConfig(U["bars"], T["Highlight Equipped Items"], C.bars, "showequipped", "checkbox")
       CreateConfig(U["bars"], T["Equipped Item Color"], C.bars, "eqcolor", "color")
@@ -2458,7 +2460,8 @@ pfUI:RegisterModule("gui", "vanilla:tbc", function ()
     CreateGUIEntry(T["Components"], T["Modules"], function()
       table.sort(pfUI.modules)
       for i,m in pairs(pfUI.modules) do
-        if m ~= "gui" then
+        -- skip gui and macrotweak when macro addons are loaded
+        if m ~= "gui" and not (m == "macrotweak" and pfUI:MacroAddonsLoaded()) then
           -- create disabled entry if not existing and display
           pfUI:UpdateConfig("disabled", nil, m, "0")
           CreateConfig(nil, T["Disable Module"] .. " " .. m, C.disabled, m, "checkbox")
