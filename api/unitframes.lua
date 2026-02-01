@@ -57,9 +57,15 @@ local function BuffOnUpdate()
   local texture = GetPlayerBuffTexture(bid)
   local start = 0
 
+  -- slot is empty (buff expired or doesn't exist), clear timer and bail
+  if not texture then
+    CooldownFrame_SetTimer(this.cd, 0, 0, 0)
+    return
+  end
+
   -- Get buff name for unique key (two buffs could share same texture)
   local name = ""
-  if texture and libtipscan then
+  if libtipscan then
     scanner = scanner or libtipscan:GetScanner("unitframes")
     if scanner then
       scanner:SetPlayerBuff(bid)
@@ -102,6 +108,9 @@ local function BuffOnEnter()
 
   if IsShiftKeyDown() then
     local texture = parent.label == "player" and GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL")) or UnitBuff(parent.label .. parent.id, this.id)
+
+    -- slot is empty, nothing to compare against
+    if not texture then return end
 
     local playerlist = ""
     local first = true
@@ -155,9 +164,15 @@ local function DebuffOnUpdate()
   local texture = GetPlayerBuffTexture(bid)
   local start = 0
 
+  -- slot is empty (debuff expired or doesn't exist), clear timer and bail
+  if not texture then
+    CooldownFrame_SetTimer(this.cd, 0, 0, 0)
+    return
+  end
+
   -- Get debuff name for unique key (two debuffs could share same texture)
   local name = ""
-  if texture and libtipscan then
+  if libtipscan then
     scanner = scanner or libtipscan:GetScanner("unitframes")
     if scanner then
       scanner:SetPlayerBuff(bid)
@@ -382,6 +397,7 @@ function pfUI.uf.glow.UpdateGlowAnimation()
 end
 
 local detect_icon, detect_name
+local buff_icons_seeded = false
 function pfUI.uf:DetectBuff(name, id)
   if not name or not id then return end
 
@@ -399,10 +415,21 @@ function pfUI.uf:DetectBuff(name, id)
   -- make sure the icon cache exists
   pfUI_cache.buff_icons = pfUI_cache.buff_icons or {}
 
+  -- seed cache from static locale data once per login
+  -- reverses L["icons"] (name→icon) into buff_icons (icon→name)
+  -- so that pfUI_cache.buff_icons[detect_icon] hits for all known buffs immediately
+  if not buff_icons_seeded then
+    for name, icon in pairs(L["icons"]) do
+      local path = "Interface\\Icons\\" .. icon
+      pfUI_cache.buff_icons[path] = pfUI_cache.buff_icons[path] or name
+    end
+    buff_icons_seeded = true
+  end
+
   -- check the regular way
   detect_icon = UnitBuff(name, id)
   if detect_icon then
-    if not L["icons"][detect_name] and not pfUI_cache.buff_icons[detect_icon] then
+    if not pfUI_cache.buff_icons[detect_icon] then
       -- read buff name and cache it
       scanner:SetUnitBuff(name, id)
       detect_name = scanner:Line(1)
