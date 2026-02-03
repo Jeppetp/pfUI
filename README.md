@@ -37,6 +37,20 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 
 ---
 
+## 🎯 What's New in Version 7.5.1 (February 02, 2026)
+
+- Added icon cache system - Icons are now cached in pfUI.libdebuff_icon_cache for instant lookups after first access
+
+- Replaced SpellInfo texture lookups with GetSpellIconTexture - Direct DBC queries via Nampower (~100-400x faster than tooltip parsing)
+
+- Optimized UnitDebuff() function - Now uses GetUnitField("aura") to retrieve spell IDs directly from unit data, then fetches icons via GetSpellIconTexture instead of vanilla UnitDebuff API
+
+- Changed fallback icons - Unknown spell icons now display QuestionMark instead of class-specific icons
+
+- Performance impact - Icon lookups reduced from ~5-20ms to ~0.05ms (first) / ~0.001ms (cached) per debuff, resulting in 600-2600x speedup for full debuff bars
+
+---
+
 ## 🎯 What's New in Version 7.5.0 (January 31, 2026)
 
 ### 🔧 Player Buff Bar Timer Fix (buffwatch.lua)
