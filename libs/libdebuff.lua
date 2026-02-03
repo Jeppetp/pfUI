@@ -33,8 +33,8 @@ local hasNampower = false
 if GetNampowerVersion then
   local major, minor, patch = GetNampowerVersion()
   patch = patch or 0
-  -- Minimum required version: 2.27.1
-  if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 1) then
+  -- Minimum required version: 2.27.2 (SPELL_FAILED_OTHER fix)
+  if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 2) then
     hasNampower = true
   end
 end
@@ -64,8 +64,8 @@ nampowerCheckFrame:SetScript("OnEvent", function()
         patch = patch or 0  -- Fallback falls patch nil ist
         local versionString = major .. "." .. minor .. "." .. patch
         
-        -- Check for minimum required version: 2.27.1
-        if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 1) then
+        -- Check for minimum required version: 2.27.2 (SPELL_FAILED_OTHER fix)
+        if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 2) then
           DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Nampower v" .. versionString .. " detected - debuff tracking enabled!")
           
           -- ✅ Aktiviere benötigte Nampower CVars
@@ -118,13 +118,29 @@ nampowerCheckFrame:SetScript("OnEvent", function()
             DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff]|r /run SetCVar('NP_EnableAuraCastEvents','1')")
           end
           
+        elseif major == 2 and minor == 27 and patch == 1 then
+          -- Special warning for 2.27.1 (SPELL_FAILED_OTHER broken)
+          DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff] WARNING: Nampower v2.27.1 detected!|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff] Cast-bar cancel detection will NOT work due to SPELL_FAILED_OTHER bug.|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff] Please update to v2.27.2 or higher!|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff] Download: https://gitea.com/avitasia/nampower/releases/tag/v2.27.2|r")
+          
+          -- Show popup warning
+          StaticPopup_Show("LIBDEBUFF_NAMPOWER_UPDATE", versionString)
+          
         else
-          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Debuff tracking disabled! Please update Nampower to v2.27.1 or higher.|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Debuff tracking disabled! Please update Nampower to v2.27.2 or higher.|r")
           DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Current version: |r|cffff0000[" .. versionString .. "]|r")
-          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] https://gitea.com/avitasia/nampower/releases/tag/v2.27.1")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Download: https://gitea.com/avitasia/nampower/releases/tag/v2.27.2|r")
+          
+          -- Show popup warning
+          StaticPopup_Show("LIBDEBUFF_NAMPOWER_UPDATE", versionString)
         end
       else
         DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Nampower not found! Debuff tracking disabled.|r")
+        
+        -- Show popup warning
+        StaticPopup_Show("LIBDEBUFF_NAMPOWER_MISSING")
       end
       
       nampowerCheckFrame:SetScript("OnUpdate", nil)
@@ -155,6 +171,35 @@ local pendingCasts = pfUI.libdebuff_pending
 -- Spell Icon Cache: [spellId] = texture
 pfUI.libdebuff_icon_cache = pfUI.libdebuff_icon_cache or {}
 local iconCache = pfUI.libdebuff_icon_cache
+
+-- Cast Tracking: [casterGuid] = {spellID, spellName, icon, startTime, duration, endTime}
+-- Shared with nameplates for cast-bar display
+pfUI.libdebuff_casts = pfUI.libdebuff_casts or {}
+
+-- StaticPopup for Nampower version warning
+StaticPopupDialogs["LIBDEBUFF_NAMPOWER_UPDATE"] = {
+  text = "Nampower Update Required!\n\nYour current version: %s\nRequired version: 2.27.2+\n\nReason: SPELL_FAILED_OTHER bug fix needed for cast-bar cancel detection.\n\nPlease update Nampower!",
+  button1 = "OK",
+  timeout = 0,
+  whileDead = 1,
+  hideOnEscape = 1,
+  preferredIndex = 3,
+  OnAccept = function()
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Download: https://gitea.com/avitasia/nampower/releases/tag/v2.27.2")
+  end,
+}
+
+StaticPopupDialogs["LIBDEBUFF_NAMPOWER_MISSING"] = {
+  text = "Nampower Not Found!\n\nNampower 2.27.2+ is required for pfUI Enhanced debuff tracking and cast-bar features.\n\nPlease install Nampower.",
+  button1 = "OK",
+  timeout = 0,
+  whileDead = 1,
+  hideOnEscape = 1,
+  preferredIndex = 3,
+  OnAccept = function()
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Download: https://gitea.com/avitasia/nampower/releases")
+  end,
+}
 
 -- Get spell icon texture (with caching for performance)
 -- Uses GetSpellIconTexture (Nampower) for fast DBC lookup
@@ -193,6 +238,11 @@ function libdebuff:GetSpellIcon(spellId)
   iconCache[spellId] = texture
   
   return texture
+end
+
+-- Export for external use (saves locals in other modules)
+pfUI.libdebuff_GetSpellIcon = function(spellId)
+  return libdebuff:GetSpellIcon(spellId)
 end
 
 -- Track recent DEBUFF_REMOVED events to suppress unnecessary rescans
@@ -1559,8 +1609,11 @@ if hasNampower then
   frame:RegisterEvent("PLAYER_COMBO_POINTS")
   frame:RegisterEvent("PLAYER_TALENT_UPDATE")
   frame:RegisterEvent("PLAYER_LOGOUT")
+  frame:RegisterEvent("SPELL_START_SELF")
+  frame:RegisterEvent("SPELL_START_OTHER")
   frame:RegisterEvent("SPELL_GO_SELF")
   frame:RegisterEvent("SPELL_GO_OTHER")
+  frame:RegisterEvent("SPELL_FAILED_OTHER")
   frame:RegisterEvent("AURA_CAST_ON_SELF")
   frame:RegisterEvent("AURA_CAST_ON_OTHER")
   frame:RegisterEvent("DEBUFF_ADDED_OTHER")
@@ -2003,6 +2056,31 @@ if hasNampower then
         stacks = 1
       }
       
+    elseif event == "SPELL_START_SELF" or event == "SPELL_START_OTHER" then
+      local itemId = arg1
+      local spellId = arg2
+      local casterGuid = arg3
+      local targetGuid = arg4
+      local castFlags = arg5
+      local castTime = arg6  -- in milliseconds
+      
+      if not casterGuid or not spellId then return end
+      
+      -- Get spell name and icon
+      local spellName = SpellInfo and SpellInfo(spellId) or nil
+      local icon = libdebuff:GetSpellIcon(spellId)
+      
+      -- Store cast info for nameplates
+      pfUI.libdebuff_casts[casterGuid] = {
+        spellID = spellId,  -- uppercase ID for consistency with nameplates
+        spellName = spellName,
+        icon = icon,
+        startTime = GetTime(),
+        duration = castTime and castTime / 1000 or 0,
+        endTime = castTime and (GetTime() + castTime / 1000) or nil,
+        event = "START"
+      }
+      
     elseif event == "SPELL_GO_SELF" or event == "SPELL_GO_OTHER" then
       local itemId = arg1
       local spellId = arg2
@@ -2011,6 +2089,11 @@ if hasNampower then
       local castFlags = arg5
       local numTargetsHit = arg6
       local numTargetsMissed = arg7
+      
+      -- Clear cast info for nameplates
+      if casterGuid and pfUI.libdebuff_casts[casterGuid] then
+        pfUI.libdebuff_casts[casterGuid] = nil
+      end
       
       -- Nur erfolgreiche Casts (mindestens 1 Target getroffen, keine Misses)
       if numTargetsMissed > 0 or numTargetsHit == 0 then return end
@@ -2034,6 +2117,15 @@ if hasNampower then
           rank = castRank,
           time = GetTime()
         }
+      end
+      
+    elseif event == "SPELL_FAILED_OTHER" then
+      local casterGuid = arg1
+      local spellId = arg2
+      
+      -- Clear cast info for nameplates (movement cancel, interrupted, etc.)
+      if casterGuid and pfUI.libdebuff_casts[casterGuid] then
+        pfUI.libdebuff_casts[casterGuid] = nil
       end
       
     elseif event == "DEBUFF_ADDED_OTHER" then

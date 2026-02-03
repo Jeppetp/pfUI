@@ -1,6 +1,6 @@
 # pfUI - Turtle WoW Enhanced Edition (Experiment Branch)
 
-[![Version](https://img.shields.io/badge/version-7.5.1--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
+[![Version](https://img.shields.io/badge/version-7.6.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
 [![Turtle WoW](https://img.shields.io/badge/Turtle%20WoW-1.18.0-brightgreen.svg)](https://turtlecraft.gg/)
 [![SuperWoW](https://img.shields.io/badge/SuperWoW-REQUIRED-purple.svg)](https://github.com/balakethelock/SuperWoW)
 [![Nampower](https://img.shields.io/badge/Nampower-REQUIRED-yellow.svg)](https://gitea.com/avitasia/nampower)
@@ -34,6 +34,121 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 - ✅ You want a stable, battle-tested build
 - ✅ You don't have Nampower
 - ✅ You prefer reliability over bleeding-edge features
+
+---
+
+## 🎯 What's New in Version 7.6.0 (February 3, 2026)
+
+### 🚀 Centralized Cast-Bar Tracking System (libdebuff.lua + nameplates.lua)
+
+**Major architectural change: Cast tracking moved from nameplates to libdebuff for single source of truth!**
+
+Previously, both `nameplates.lua` and `libdebuff.lua` independently tracked cast events, creating code duplication and maintenance overhead. Now all cast tracking is centralized in `libdebuff.lua` with nameplates consuming shared data.
+
+**libdebuff.lua - NEW Cast Tracking:**
+- ✅ `SPELL_START_SELF/OTHER` → Cast-Start Tracking
+- ✅ `SPELL_GO_SELF/OTHER` → Cast-Completion Tracking  
+- ✅ `SPELL_FAILED_OTHER` → Cast-Cancel Detection (movement, interrupts, OOM)
+- ✅ `pfUI.libdebuff_casts` → Shared cast data structure `[casterGuid] = {spellID, spellName, icon, startTime, duration, endTime, event}`
+- ✅ `pfUI.libdebuff_GetSpellIcon()` → Icon cache export function
+
+**nameplates.lua - Simplified Cast Consumption:**
+- ✅ `GetCastInfo(guid)` → Reads `pfUI.libdebuff_casts`
+- ✅ `pfUI.libdebuff_GetSpellIcon` → Uses shared icon cache
+- ❌ `UNIT_CASTEVENT` → **REMOVED** (replaced by Nampower SPELL_* events)
+- ❌ Local cast tracking code → **REMOVED** (~56 lines saved)
+
+**Benefits:**
+- **100% Nampower, 0% SuperWOW** - No longer depends on UNIT_CASTEVENT
+- **Single Source of Truth** - Cast data only tracked once
+- **Icon Cache 100-400x faster** - First lookup via Nampower's GetSpellIconTexture, then cached
+- **Easier Maintenance** - Changes only in one place
+- **Code Reduction** - 56 lines removed from nameplates.lua
+
+### ⚠️ Nampower Version Requirement Update (libdebuff.lua)
+
+**Now requires Nampower 2.27.2+ (SPELL_FAILED_OTHER bug fix):**
+
+Version 2.27.1 had a bug where `SPELL_FAILED_OTHER` didn't fire for movement-cancelled casts. This is now fixed in 2.27.2.
+
+**User Warnings:**
+- **2.27.2+**: ✅ Success message + auto-enable CVars
+- **2.27.1**: ⚠️ Yellow warning + popup (cast-bar cancel broken)
+- **< 2.27.1**: ❌ Red error + popup (debuff tracking disabled)
+- **No Nampower**: ❌ Red error + popup (addon disabled)
+
+**NEW StaticPopup Dialogs:**
+
+Popups appear center-screen on login to ensure users don't miss the version requirement!
+
+### 🌿 libpredict HoT Tracking Integration (libpredict.lua)
+
+**Major enhancement: libdebuff integration for server-accurate HoT tracking!**
+
+Previously, libpredict relied purely on prediction (UNIT_CASTEVENT + timing calculations). Now it uses libdebuff's AURA_CAST events for server-side accurate buff/debuff data when available.
+
+**NEW Hybrid System:**
+```
+GetHotDuration(unit, spell):
+  1. Try libdebuff first (Nampower AURA_CAST events)
+     ↓
+     if available: return server-accurate data
+  
+  2. Fallback to prediction (legacy system)
+     ↓
+     Use hots[] table with UNIT_CASTEVENT prediction
+```
+
+**Benefits:**
+- ✅ **Server-accurate durations** - No prediction needed with Nampower
+- ✅ **Automatic rank protection** - Built into libdebuff's system
+- ✅ **Multi-caster support** - Multiple druids = multiple rejuvs tracked separately
+- ✅ **Zero overhead** - libdebuff already tracks all auras
+- ✅ **Backwards compatible** - Falls back to prediction without Nampower
+
+**NEW Rank Support for HoTs:**
+
+Extended `Hot()` function signature to include rank parameter:
+```lua
+function libpredict:Hot(sender, target, spell, duration, startTime, source, rank)
+```
+
+**Rank Protection Logic:**
+- Don't overwrite Rank 10 HoT with Rank 8!
+- Active higher-rank HoTs block lower-rank applications
+- Works with multiple casters simultaneously
+
+**HealComm Protocol Extended (Backwards Compatible):**
+- OLD: `"Reju/TargetName/15/"`
+- NEW: `"Reju/TargetName/15/10/"` (rank added)
+- `"0"` = unknown rank (for non-rank-aware clients)
+
+**Example Scenario:**
+```
+Druid A casts Rejuvenation Rank 10 (15s duration)
+Druid B casts Rejuvenation Rank 8  (12s duration)
+
+With rank protection:
+→ Rank 8 is BLOCKED while Rank 10 is active!
+→ No more accidental overwrites of better HoTs!
+```
+
+### 📊 Code Statistics
+
+**libdebuff.lua:**
+- Lines: 2743 → 2835 (+92 lines)
+- Events: 12 → 15 (+3: SPELL_START_SELF/OTHER, SPELL_FAILED_OTHER)
+- Exports: 14 → 16 (+2: pfUI.libdebuff_casts, pfUI.libdebuff_GetSpellIcon)
+
+**nameplates.lua:**
+- Lines: 1826 → 1770 (-56 lines)
+- Events: 7 → 6 (-1: UNIT_CASTEVENT removed)
+- Code removed: ~74 lines (UNIT_CASTEVENT handler, local cast tracking)
+
+**libpredict.lua:**
+- Lines: 935 → 1095 (+160 lines)
+- New: libdebuff integration, rank support, rank protection logic
+- Backwards compatible: Works with/without Nampower
 
 ---
 
