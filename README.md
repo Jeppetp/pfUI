@@ -49,7 +49,7 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 
 - Performance impact - Icon lookups reduced from ~5-20ms to ~0.05ms (first) / ~0.001ms (cached) per debuff, resulting in 600-2600x speedup for full debuff bars
 
-- Replace the UNIT_CASTEVENT of Superwow with Nampowers SPELL_GO and SPELL_START events (slowly trying to get away from superwow, not maintained anymore and outdated)
+- Replaced the UNIT_CASTEVENT of Superwow with Nampowers SPELL_GO and SPELL_START events (slowly trying to get away from superwow, not maintained anymore and outdated)
 
 ---
 
