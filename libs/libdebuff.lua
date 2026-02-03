@@ -150,6 +150,49 @@ local allAuraCasts = pfUI.libdebuff_all_auras
 pfUI.libdebuff_pending = pfUI.libdebuff_pending or {}
 local pendingCasts = pfUI.libdebuff_pending
 
+-- Spell Icon Cache: [spellId] = texture
+pfUI.libdebuff_icon_cache = pfUI.libdebuff_icon_cache or {}
+local iconCache = pfUI.libdebuff_icon_cache
+
+-- Get spell icon texture (with caching for performance)
+-- Uses GetSpellIconTexture (Nampower) for fast DBC lookup
+function libdebuff:GetSpellIcon(spellId)
+  if not spellId or type(spellId) ~= "number" or spellId <= 0 then
+    return "Interface\\Icons\\INV_Misc_QuestionMark"  -- Fallback
+  end
+  
+  -- Check cache first
+  if iconCache[spellId] then
+    return iconCache[spellId]
+  end
+  
+  local texture = nil
+  
+  -- METHOD 1: GetSpellIconTexture (fast, requires Nampower)
+  if GetSpellRecField and GetSpellIconTexture then
+    local spellIconId = GetSpellRecField(spellId, "spellIconID")
+    if spellIconId and type(spellIconId) == "number" and spellIconId > 0 then
+      texture = GetSpellIconTexture(spellIconId)
+    end
+  end
+  
+  -- METHOD 2: Fallback to SpellInfo (slower, but works without Nampower)
+  if not texture and SpellInfo then
+    local _, _, spellTexture = SpellInfo(spellId)
+    texture = spellTexture
+  end
+  
+  -- Final fallback
+  if not texture then
+    texture = "Interface\\Icons\\INV_Misc_QuestionMark"
+  end
+  
+  -- Cache result
+  iconCache[spellId] = texture
+  
+  return texture
+end
+
 -- Track recent DEBUFF_REMOVED events to suppress unnecessary rescans
 pfUI.libdebuff_recent_removals = pfUI.libdebuff_recent_removals or {}
 local recentRemovals = pfUI.libdebuff_recent_removals
@@ -1146,15 +1189,49 @@ local RESCAN_THROTTLE = 1 -- seconds
 function libdebuff:UnitDebuff(unit, id)
   local unitname = UnitName(unit)
   local unitlevel = UnitLevel(unit)
-  local texture, stacks, dtype = UnitDebuff(unit, id)
+  local texture, stacks, dtype
+  local spellId = nil
   local duration, timeleft = nil, -1
   local rank = nil -- no backport
   local caster = nil -- experimental
   local effect
 
-  if texture then
-    scanner:SetUnitDebuff(unit, id)
-    effect = scanner:Line(1) or ""
+  -- OPTIMIZED: Use GetUnitField to get spellID directly (Nampower)
+  if GetUnitField then
+    -- Debuff slots: 1-16 map to aura array indices 33-48
+    local auraSlot = 32 + id
+    
+    -- Get spell ID from aura array
+    local auras = GetUnitField(unit, "aura")
+    if auras and auras[auraSlot] and auras[auraSlot] > 0 then
+      spellId = auras[auraSlot]
+      
+      -- Get texture via optimized GetSpellIcon (uses GetSpellIconTexture with caching)
+      texture = libdebuff:GetSpellIcon(spellId)
+      
+      -- Get stack count from auraApplications array
+      local applications = GetUnitField(unit, "auraApplications")
+      stacks = (applications and applications[auraSlot]) or 1
+      
+      -- Get spell name via SpellInfo
+      if SpellInfo then
+        effect = SpellInfo(spellId)
+      end
+      
+      -- dtype (debuff type) - we don't have this from GetUnitField
+      -- Leave as nil for now (not critical, mainly for dispel checks)
+      dtype = nil
+    end
+  end
+  
+  -- FALLBACK: Use vanilla UnitDebuff API if GetUnitField failed or not available
+  if not texture then
+    texture, stacks, dtype = UnitDebuff(unit, id)
+    
+    if texture then
+      scanner:SetUnitDebuff(unit, id)
+      effect = scanner:Line(1) or ""
+    end
   end
 
   -- Nampower: Check slots with allSlots
@@ -1429,7 +1506,7 @@ function libdebuff:UnitOwnDebuff(unit, id)
         if data.slot and timeleft > -1 then
           cache[spellName] = true
           if count == id then
-            local texture = data.texture or "Interface\\Icons\\Spell_Shadow_CurseOfTongues"
+            local texture = data.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
             -- Return 0 for timeleft if expired, but keep it in the list
             local displayTimeleft = timeleft > 0 and timeleft or 0
             return spellName, data.rank, texture, 1, nil, data.duration, displayTimeleft, "player"
@@ -1629,11 +1706,14 @@ if hasNampower then
       local targetGuid = arg3
       local durationMs = arg8
       
-      -- SpellInfo returns: name, rank, texture, minrange, maxrange
+      -- SpellInfo returns: name, rank (texture via GetSpellIconTexture + caching)
       if not SpellInfo then return end
       
-      local spellName, spellRankString, texture = SpellInfo(spellId)
+      local spellName, spellRankString = SpellInfo(spellId)
       if not spellName then return end
+      
+      -- Get texture via optimized icon lookup (uses GetSpellIconTexture with caching)
+      local texture = libdebuff:GetSpellIcon(spellId)
       
       -- Duplicate filter: Same spell + caster + target within 0.1s
       local now = GetTime()
@@ -1643,11 +1723,6 @@ if hasNampower then
       end
       lastEventSignature = signature
       lastEventTime = now
-      
-      -- Fallback texture
-      if not texture then
-        texture = arg5 or (pfUI_cache and pfUI_cache.debuff_icons and pfUI_cache.debuff_icons[spellName]) or "Interface\\Icons\\Spell_Shadow_CurseOfTongues"
-      end
       
       -- Extract rank number
       local rankNum = 0
@@ -2661,3 +2736,4 @@ _G.SlashCmdList["MEMCHECK"] = function()
   DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[ACTIVE]|r %d own debuffs, %d other casts", totalOwnDebuffs, activeAuraCasts))
   DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff========================================|r")
 end
+
