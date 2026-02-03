@@ -32,7 +32,9 @@ local hasNampower = false
 -- Set hasNampower immediately for functionality
 if GetNampowerVersion then
   local major, minor, patch = GetNampowerVersion()
-  if major > 2 or (major == 2 and minor >= 26) then
+  patch = patch or 0
+  -- Minimum required version: 2.27.1
+  if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 1) then
     hasNampower = true
   end
 end
@@ -62,8 +64,8 @@ nampowerCheckFrame:SetScript("OnEvent", function()
         patch = patch or 0  -- Fallback falls patch nil ist
         local versionString = major .. "." .. minor .. "." .. patch
         
-        -- Check for minimum required version: 2.26.0
-        if major > 2 or (major == 2 and minor >= 26) then
+        -- Check for minimum required version: 2.27.1
+        if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 1) then
           DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Nampower v" .. versionString .. " detected - debuff tracking enabled!")
           
           -- ✅ Aktiviere benötigte Nampower CVars
@@ -117,9 +119,9 @@ nampowerCheckFrame:SetScript("OnEvent", function()
           end
           
         else
-          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Debuff tracking disabled! Please update Nampower to v2.26.0 or higher.|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Debuff tracking disabled! Please update Nampower to v2.27.1 or higher.|r")
           DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Current version: |r|cffff0000[" .. versionString .. "]|r")
-          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] https://gitea.com/avitasia/nampower/releases/tag/v2.26.0")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] https://gitea.com/avitasia/nampower/releases/tag/v2.27.1")
         end
       else
         DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Nampower not found! Debuff tracking disabled.|r")
@@ -146,9 +148,52 @@ local allSlots = pfUI.libdebuff_all_slots
 pfUI.libdebuff_all_auras = pfUI.libdebuff_all_auras or {}
 local allAuraCasts = pfUI.libdebuff_all_auras
 
--- pendingCasts: [targetGUID][spellName] = {casterGuid, time} (temporary storage from UNIT_CASTEVENT)
+-- pendingCasts: [targetGUID][spellName] = {casterGuid, time} (temporary storage from SPELL_GO)
 pfUI.libdebuff_pending = pfUI.libdebuff_pending or {}
 local pendingCasts = pfUI.libdebuff_pending
+
+-- Spell Icon Cache: [spellId] = texture
+pfUI.libdebuff_icon_cache = pfUI.libdebuff_icon_cache or {}
+local iconCache = pfUI.libdebuff_icon_cache
+
+-- Get spell icon texture (with caching for performance)
+-- Uses GetSpellIconTexture (Nampower) for fast DBC lookup
+function libdebuff:GetSpellIcon(spellId)
+  if not spellId or type(spellId) ~= "number" or spellId <= 0 then
+    return "Interface\\Icons\\INV_Misc_QuestionMark"  -- Fallback
+  end
+  
+  -- Check cache first
+  if iconCache[spellId] then
+    return iconCache[spellId]
+  end
+  
+  local texture = nil
+  
+  -- METHOD 1: GetSpellIconTexture (fast, requires Nampower)
+  if GetSpellRecField and GetSpellIconTexture then
+    local spellIconId = GetSpellRecField(spellId, "spellIconID")
+    if spellIconId and type(spellIconId) == "number" and spellIconId > 0 then
+      texture = GetSpellIconTexture(spellIconId)
+    end
+  end
+  
+  -- METHOD 2: Fallback to SpellInfo (slower, but works without Nampower)
+  if not texture and SpellInfo then
+    local _, _, spellTexture = SpellInfo(spellId)
+    texture = spellTexture
+  end
+  
+  -- Final fallback
+  if not texture then
+    texture = "Interface\\Icons\\INV_Misc_QuestionMark"
+  end
+  
+  -- Cache result
+  iconCache[spellId] = texture
+  
+  return texture
+end
 
 -- Track recent DEBUFF_REMOVED events to suppress unnecessary rescans
 pfUI.libdebuff_recent_removals = pfUI.libdebuff_recent_removals or {}
@@ -532,7 +577,7 @@ local function InitializeTargetSlots(guid)
             end
           end
           
-          -- Also check pendingCasts (from UNIT_CASTEVENT) for spells without AURA_CAST
+          -- Also check pendingCasts (from SPELL_GO) for spells without AURA_CAST
           if not casterGuid and pendingCasts[guid] and pendingCasts[guid][spellName] then
             local pending = pendingCasts[guid][spellName]
             if GetTime() - pending.time < 1 then
@@ -1169,15 +1214,49 @@ local RESCAN_THROTTLE = 1 -- seconds
 function libdebuff:UnitDebuff(unit, id)
   local unitname = UnitName(unit)
   local unitlevel = UnitLevel(unit)
-  local texture, stacks, dtype = UnitDebuff(unit, id)
+  local texture, stacks, dtype
+  local spellId = nil
   local duration, timeleft = nil, -1
   local rank = nil -- no backport
   local caster = nil -- experimental
   local effect
 
-  if texture then
-    scanner:SetUnitDebuff(unit, id)
-    effect = scanner:Line(1) or ""
+  -- OPTIMIZED: Use GetUnitField to get spellID directly (Nampower)
+  if GetUnitField then
+    -- Debuff slots: 1-16 map to aura array indices 33-48
+    local auraSlot = 32 + id
+    
+    -- Get spell ID from aura array
+    local auras = GetUnitField(unit, "aura")
+    if auras and auras[auraSlot] and auras[auraSlot] > 0 then
+      spellId = auras[auraSlot]
+      
+      -- Get texture via optimized GetSpellIcon (uses GetSpellIconTexture with caching)
+      texture = libdebuff:GetSpellIcon(spellId)
+      
+      -- Get stack count from auraApplications array
+      local applications = GetUnitField(unit, "auraApplications")
+      stacks = (applications and applications[auraSlot]) or 1
+      
+      -- Get spell name via SpellInfo
+      if SpellInfo then
+        effect = SpellInfo(spellId)
+      end
+      
+      -- dtype (debuff type) - we don't have this from GetUnitField
+      -- Leave as nil for now (not critical, mainly for dispel checks)
+      dtype = nil
+    end
+  end
+  
+  -- FALLBACK: Use vanilla UnitDebuff API if GetUnitField failed or not available
+  if not texture then
+    texture, stacks, dtype = UnitDebuff(unit, id)
+    
+    if texture then
+      scanner:SetUnitDebuff(unit, id)
+      effect = scanner:Line(1) or ""
+    end
   end
 
   -- Nampower: Check slots with allSlots
@@ -1452,7 +1531,7 @@ function libdebuff:UnitOwnDebuff(unit, id)
         if data.slot and timeleft > -1 then
           cache[spellName] = true
           if count == id then
-            local texture = data.texture or "Interface\\Icons\\Spell_Shadow_CurseOfTongues"
+            local texture = data.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
             -- Return 0 for timeleft if expired, but keep it in the list
             local displayTimeleft = timeleft > 0 and timeleft or 0
             return spellName, data.rank, texture, 1, nil, data.duration, displayTimeleft, "player"
@@ -1503,7 +1582,6 @@ if hasNampower then
   frame:RegisterEvent("PLAYER_COMBO_POINTS")
   frame:RegisterEvent("PLAYER_TALENT_UPDATE")
   frame:RegisterEvent("PLAYER_LOGOUT")
-  frame:RegisterEvent("UNIT_CASTEVENT")
   frame:RegisterEvent("SPELL_GO_SELF")
   frame:RegisterEvent("SPELL_GO_OTHER")
   frame:RegisterEvent("AURA_CAST_ON_SELF")
@@ -1652,11 +1730,14 @@ if hasNampower then
       local targetGuid = arg3
       local durationMs = arg8
       
-      -- SpellInfo returns: name, rank, texture, minrange, maxrange
+      -- SpellInfo returns: name, rank (texture via GetSpellIconTexture + caching)
       if not SpellInfo then return end
       
-      local spellName, spellRankString, texture = SpellInfo(spellId)
+      local spellName, spellRankString = SpellInfo(spellId)
       if not spellName then return end
+      
+      -- Get texture via optimized icon lookup (uses GetSpellIconTexture with caching)
+      local texture = libdebuff:GetSpellIcon(spellId)
       
       -- Duplicate filter: Same spell + caster + target within 0.1s
       local now = GetTime()
@@ -1666,11 +1747,6 @@ if hasNampower then
       end
       lastEventSignature = signature
       lastEventTime = now
-      
-      -- Fallback texture
-      if not texture then
-        texture = arg5 or (pfUI_cache and pfUI_cache.debuff_icons and pfUI_cache.debuff_icons[spellName]) or "Interface\\Icons\\Spell_Shadow_CurseOfTongues"
-      end
       
       -- Extract rank number
       local rankNum = 0
@@ -1950,14 +2026,17 @@ if hasNampower then
         stacks = 1
       }
       
-    elseif event == "UNIT_CASTEVENT" then
-      local casterGuid = arg1
-      local targetGuid = arg2
-      local castEvent = arg3
-      local spellId = arg4
+    elseif event == "SPELL_GO_SELF" or event == "SPELL_GO_OTHER" then
+      local itemId = arg1
+      local spellId = arg2
+      local casterGuid = arg3
+      local targetGuid = arg4
+      local castFlags = arg5
+      local numTargetsHit = arg6
+      local numTargetsMissed = arg7
       
-      -- Nur "CAST" Events (nicht "START", "FAIL", etc.)
-      if castEvent ~= "CAST" then return end
+      -- Nur erfolgreiche Casts (mindestens 1 Target getroffen, keine Misses)
+      if numTargetsMissed > 0 or numTargetsHit == 0 then return end
       
       if not SpellInfo then return end
       
@@ -1970,7 +2049,7 @@ if hasNampower then
         castRank = tonumber((string.gsub(spellRankString, "Rank ", ""))) or 0
       end
       
-      -- Store in pendingCasts for SPELL_GO and DEBUFF_ADDED
+      -- Store in pendingCasts for DEBUFF_ADDED
       if targetGuid then
         pendingCasts[targetGuid] = pendingCasts[targetGuid] or {}
         pendingCasts[targetGuid][spellName] = {
@@ -1992,7 +2071,7 @@ if hasNampower then
         return
       end
       
-      -- Get casterGuid from pendingCasts (UNIT_CASTEVENT)
+      -- Get casterGuid from pendingCasts (SPELL_GO)
       local casterGuid = nil
       if pendingCasts[guid] and pendingCasts[guid][spellName] then
         local pending = pendingCasts[guid][spellName]
@@ -2684,3 +2763,4 @@ _G.SlashCmdList["MEMCHECK"] = function()
   DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[ACTIVE]|r %d own debuffs, %d other casts", totalOwnDebuffs, activeAuraCasts))
   DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff========================================|r")
 end
+

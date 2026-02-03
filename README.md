@@ -1,6 +1,6 @@
 # pfUI - Turtle WoW Enhanced Edition (Experiment Branch)
 
-[![Version](https://img.shields.io/badge/version-7.5.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
+[![Version](https://img.shields.io/badge/version-7.5.1--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
 [![Turtle WoW](https://img.shields.io/badge/Turtle%20WoW-1.18.0-brightgreen.svg)](https://turtlecraft.gg/)
 [![SuperWoW](https://img.shields.io/badge/SuperWoW-REQUIRED-purple.svg)](https://github.com/balakethelock/SuperWoW)
 [![Nampower](https://img.shields.io/badge/Nampower-REQUIRED-yellow.svg)](https://gitea.com/avitasia/nampower)
@@ -34,6 +34,22 @@ This is an experimental pfUI fork with a **complete rewrite of the debuff tracki
 - ✅ You want a stable, battle-tested build
 - ✅ You don't have Nampower
 - ✅ You prefer reliability over bleeding-edge features
+
+---
+
+## 🎯 What's New in Version 7.5.1 (February 02, 2026)
+
+- Added icon cache system - Icons are now cached in pfUI.libdebuff_icon_cache for instant lookups after first access
+
+- Replaced SpellInfo texture lookups with GetSpellIconTexture - Direct DBC queries via Nampower (~100-400x faster than tooltip parsing)
+
+- Optimized UnitDebuff() function - Now uses GetUnitField("aura") to retrieve spell IDs directly from unit data, then fetches icons via GetSpellIconTexture instead of vanilla UnitDebuff API
+
+- Changed fallback icons - Unknown spell icons now display QuestionMark instead of class-specific icons
+
+- Performance impact - Icon lookups reduced from ~5-20ms to ~0.05ms (first) / ~0.001ms (cached) per debuff, resulting in 600-2600x speedup for full debuff bars
+
+- Replaced in libdebuff.lua the UNIT_CASTEVENT of Superwow with Nampowers SPELL_GO and SPELL_START events (slowly trying to get away from superwow, not maintained anymore and outdated)
 
 ---
 
@@ -882,4 +898,4 @@ Same as original pfUI: GNU General Public License v3.0
 ---
 
 *Last Updated: January 31, 2026*
-*Version: 7.5.0-experimental*
+*Version: 7.5.1-experimental*
