@@ -76,12 +76,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
   -- OPTIMIZATION: GUID-based registries for O(1) lookups
   -- ============================================================================
   local guidRegistry = {}   -- guid -> plate (for direct event routing)
-  
-  -- Helper function to safely access libdebuff cast data
-  local function GetCastInfo(guid)
-    return pfUI.libdebuff_casts and pfUI.libdebuff_casts[guid]
-  end
-  
+  local CastEvents = {}     -- guid -> cast info
   local debuffCache = {}    -- guid -> { [spellID] = { start, duration } }
   local threatMemory = {}   -- guid -> true if mob had player targeted
   local debuffSeen = {}     -- reusable table for debuff tracking (avoid GC churn)
@@ -153,8 +148,7 @@ pfUI:RegisterModule("nameplates", "vanilla", function ()
     local target = guid.."target"
     local color = false
 
-    local castInfo = GetCastInfo(guid)
-    local isCasting = castInfo and castInfo.endTime and frameState.now < castInfo.endTime
+    local isCasting = CastEvents[guid] and CastEvents[guid].endTime and frameState.now < CastEvents[guid].endTime
     local targetingPlayer = UnitIsUnit(target, "player")
 
     -- Remember if mob targets player, clear only when targeting someone else while NOT casting
@@ -461,8 +455,10 @@ nameplates:RegisterEvent("UNIT_COMBO_POINTS")
 nameplates:RegisterEvent("PLAYER_COMBO_POINTS")
 nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
   
-  -- Cast tracking handled by libdebuff (SPELL_START/GO/FAILED events)
-  -- No local event registration needed
+  -- NEW: Register cast events like Overhead.lua
+  if superwow_active then
+    nameplates:RegisterEvent("UNIT_CASTEVENT")
+  end
 
   -- Callback from libdebuff when auras change (GUID-based, event-driven)
   nameplates.OnAuraUpdate = function(self, guid)
@@ -534,6 +530,69 @@ nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
           savedHostileState = nil
           savedFriendlyState = nil
         end
+      end
+
+    elseif event == "UNIT_CASTEVENT" then
+      local casterGUID = arg1
+      local targetGUID = arg2
+      local eventType = arg3  -- "START", "CAST", "FAIL", "CHANNEL", "MAINHAND", "OFFHAND"
+      local spellID = arg4
+      local castDuration = arg5
+
+      -- Skip player casts and melee
+      if casterGUID == PlayerGUID then return end
+      if eventType == "MAINHAND" or eventType == "OFFHAND" then return end
+
+      -- Store cast data
+      if eventType == "START" or eventType == "CHANNEL" then
+        if not CastEvents[casterGUID] then CastEvents[casterGUID] = {} end
+        wipe(CastEvents[casterGUID])
+
+        local spellName, _, icon = SpellInfo(spellID)
+        CastEvents[casterGUID].event = eventType
+        CastEvents[casterGUID].spellID = spellID
+        CastEvents[casterGUID].spellName = spellName
+        CastEvents[casterGUID].icon = icon
+        CastEvents[casterGUID].startTime = GetTime()
+        CastEvents[casterGUID].endTime = castDuration and GetTime() + castDuration / 1000
+        CastEvents[casterGUID].duration = castDuration and castDuration / 1000
+
+      elseif eventType == "CAST" or eventType == "FAIL" then
+        if CastEvents[casterGUID] then
+          wipe(CastEvents[casterGUID])
+        end
+        
+        -- PERF: Immediately hide castbar on CAST/FAIL
+        local plate = guidRegistry[casterGUID]
+        
+        -- Fallback: If guidRegistry empty (after /reload), check if caster is target
+        if not plate then
+          local _, targetGuid = UnitExists("target")
+          if targetGuid and targetGuid == casterGUID then
+            -- Find target plate by alpha and register it
+            for registeredPlate in pairs(registry) do
+              if registeredPlate:IsVisible() and registeredPlate:GetAlpha() >= 0.99 then
+                -- Register this plate for future lookups
+                guidRegistry[casterGUID] = registeredPlate
+                if registeredPlate.nameplate then
+                  registeredPlate.nameplate.cachedGuid = casterGUID
+                end
+                plate = registeredPlate
+                break
+              end
+            end
+          end
+        end
+        
+        if plate and plate.nameplate and plate.nameplate.castbar then
+          plate.nameplate.castbar:Hide()
+        end
+      end
+
+      -- Flag plate for castbar update via GUID registry (O(1) lookup)
+      local plate = guidRegistry[casterGUID]
+      if plate and plate.nameplate then
+        plate.nameplate.castUpdate = true
       end
 
     elseif event == "PLAYER_TARGET_CHANGED" then
@@ -626,13 +685,10 @@ nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
             guidRegistry[guid] = nil
           end
           
-          -- Clean cast cache ONLY if cast has expired
+          -- Clean CastEvents cache ONLY if cast has expired
           -- (Don't delete active casts just because plate was hidden briefly)
-          local castInfo = GetCastInfo(guid)
-          if castInfo and castInfo.endTime and castInfo.endTime < frameState.now then
-            if pfUI.libdebuff_casts then
-              pfUI.libdebuff_casts[guid] = nil
-            end
+          if CastEvents[guid] and CastEvents[guid].endTime and CastEvents[guid].endTime < frameState.now then
+            CastEvents[guid] = nil
           end
           
           -- Clean debuffCache
@@ -1480,7 +1536,7 @@ nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
       end
     end
 
-    -- OPTIMIZED: 100% Nampower - libdebuff handles all cast events (SPELL_START/GO/FAILED)
+    -- OPTIMIZED: UNIT_CASTEVENT implementation
     -- Use multiple checks for target detection (target variable, istarget flag, or zoomed state)
     local isTargetPlate = target or nameplate.istarget or (nameplate.health and nameplate.health.zoomed)
     if cfg.showcastbar and ( not cfg.targetcastbar or isTargetPlate ) then
@@ -1498,7 +1554,7 @@ nameplates:RegisterEvent("ZONE_CHANGED_NEW_AREA")
       end
       
       -- Check event-based cast cache first (use GUID)
-      local castInfo = GetCastInfo(targetGUID) or (unitstr and GetCastInfo(unitstr))
+      local castInfo = (targetGUID and CastEvents[targetGUID]) or (unitstr and CastEvents[unitstr])
       
       if castInfo and castInfo.spellID then
         -- Check if cast is still valid
