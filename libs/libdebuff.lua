@@ -33,8 +33,8 @@ local hasNampower = false
 if GetNampowerVersion then
   local major, minor, patch = GetNampowerVersion()
   patch = patch or 0
-  -- Minimum required version: 2.27.1
-  if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 1) then
+  -- Minimum required version: 2.27.2 (SPELL_FAILED_OTHER fix)
+  if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 2) then
     hasNampower = true
   end
 end
@@ -64,8 +64,8 @@ nampowerCheckFrame:SetScript("OnEvent", function()
         patch = patch or 0  -- Fallback falls patch nil ist
         local versionString = major .. "." .. minor .. "." .. patch
         
-        -- Check for minimum required version: 2.27.1
-        if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 1) then
+        -- Check for minimum required version: 2.27.2 (SPELL_FAILED_OTHER fix)
+        if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 2) then
           DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Nampower v" .. versionString .. " detected - debuff tracking enabled!")
           
           -- ✅ Aktiviere benötigte Nampower CVars
@@ -118,13 +118,29 @@ nampowerCheckFrame:SetScript("OnEvent", function()
             DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff]|r /run SetCVar('NP_EnableAuraCastEvents','1')")
           end
           
+        elseif major == 2 and minor == 27 and patch == 1 then
+          -- Special warning for 2.27.1 (SPELL_FAILED_OTHER broken)
+          DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff] WARNING: Nampower v2.27.1 detected!|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff] Cast-bar cancel detection will NOT work due to SPELL_FAILED_OTHER bug.|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff] Please update to v2.27.2 or higher!|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff] Download: https://gitea.com/avitasia/nampower/releases/tag/v2.27.2|r")
+          
+          -- Show popup warning
+          StaticPopup_Show("LIBDEBUFF_NAMPOWER_UPDATE", versionString)
+          
         else
-          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Debuff tracking disabled! Please update Nampower to v2.27.1 or higher.|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Debuff tracking disabled! Please update Nampower to v2.27.2 or higher.|r")
           DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Current version: |r|cffff0000[" .. versionString .. "]|r")
-          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] https://gitea.com/avitasia/nampower/releases/tag/v2.27.1")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Download: https://gitea.com/avitasia/nampower/releases/tag/v2.27.2|r")
+          
+          -- Show popup warning
+          StaticPopup_Show("LIBDEBUFF_NAMPOWER_UPDATE", versionString)
         end
       else
         DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Nampower not found! Debuff tracking disabled.|r")
+        
+        -- Show popup warning
+        StaticPopup_Show("LIBDEBUFF_NAMPOWER_MISSING")
       end
       
       nampowerCheckFrame:SetScript("OnUpdate", nil)
@@ -155,6 +171,41 @@ local pendingCasts = pfUI.libdebuff_pending
 -- Spell Icon Cache: [spellId] = texture
 pfUI.libdebuff_icon_cache = pfUI.libdebuff_icon_cache or {}
 local iconCache = pfUI.libdebuff_icon_cache
+
+-- Cast Tracking: [casterGuid] = {spellID, spellName, icon, startTime, duration, endTime}
+-- Shared with nameplates for cast-bar display
+pfUI.libdebuff_casts = pfUI.libdebuff_casts or {}
+
+-- Deduplication
+if not lastProcessedDebuff then lastProcessedDebuff = {} end
+
+-- Track last DEBUFF_REMOVED time per GUID for debug output
+if not lastDebuffRemoved then lastDebuffRemoved = {} end
+
+-- StaticPopup for Nampower version warning
+StaticPopupDialogs["LIBDEBUFF_NAMPOWER_UPDATE"] = {
+  text = "Nampower Update Required!\n\nYour current version: %s\nRequired version: 2.27.2+\n\nReason: SPELL_FAILED_OTHER bug fix needed for cast-bar cancel detection.\n\nPlease update Nampower!",
+  button1 = "OK",
+  timeout = 0,
+  whileDead = 1,
+  hideOnEscape = 1,
+  preferredIndex = 3,
+  OnAccept = function()
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Download: https://gitea.com/avitasia/nampower/releases/tag/v2.27.2")
+  end,
+}
+
+StaticPopupDialogs["LIBDEBUFF_NAMPOWER_MISSING"] = {
+  text = "Nampower Not Found!\n\nNampower 2.27.2+ is required for pfUI Enhanced debuff tracking and cast-bar features.\n\nPlease install Nampower.",
+  button1 = "OK",
+  timeout = 0,
+  whileDead = 1,
+  hideOnEscape = 1,
+  preferredIndex = 3,
+  OnAccept = function()
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Download: https://gitea.com/avitasia/nampower/releases")
+  end,
+}
 
 -- Get spell icon texture (with caching for performance)
 -- Uses GetSpellIconTexture (Nampower) for fast DBC lookup
@@ -193,6 +244,11 @@ function libdebuff:GetSpellIcon(spellId)
   iconCache[spellId] = texture
   
   return texture
+end
+
+-- Export for external use (saves locals in other modules)
+pfUI.libdebuff_GetSpellIcon = function(spellId)
+  return libdebuff:GetSpellIcon(spellId)
 end
 
 -- Track recent DEBUFF_REMOVED events to suppress unnecessary rescans
@@ -1191,49 +1247,16 @@ local RESCAN_THROTTLE = 1 -- seconds
 function libdebuff:UnitDebuff(unit, id)
   local unitname = UnitName(unit)
   local unitlevel = UnitLevel(unit)
-  local texture, stacks, dtype
-  local spellId = nil
+  local texture, stacks, dtype = UnitDebuff(unit, id)  -- Blizzard API ZUERST!
   local duration, timeleft = nil, -1
   local rank = nil -- no backport
   local caster = nil -- experimental
   local effect
 
-  -- OPTIMIZED: Use GetUnitField to get spellID directly (Nampower)
-  if GetUnitField then
-    -- Debuff slots: 1-16 map to aura array indices 33-48
-    local auraSlot = 32 + id
-    
-    -- Get spell ID from aura array
-    local auras = GetUnitField(unit, "aura")
-    if auras and auras[auraSlot] and auras[auraSlot] > 0 then
-      spellId = auras[auraSlot]
-      
-      -- Get texture via optimized GetSpellIcon (uses GetSpellIconTexture with caching)
-      texture = libdebuff:GetSpellIcon(spellId)
-      
-      -- Get stack count from auraApplications array
-      local applications = GetUnitField(unit, "auraApplications")
-      stacks = (applications and applications[auraSlot]) or 1
-      
-      -- Get spell name via SpellInfo
-      if SpellInfo then
-        effect = SpellInfo(spellId)
-      end
-      
-      -- dtype (debuff type) - we don't have this from GetUnitField
-      -- Leave as nil for now (not critical, mainly for dispel checks)
-      dtype = nil
-    end
-  end
-  
-  -- FALLBACK: Use vanilla UnitDebuff API if GetUnitField failed or not available
-  if not texture then
-    texture, stacks, dtype = UnitDebuff(unit, id)
-    
-    if texture then
-      scanner:SetUnitDebuff(unit, id)
-      effect = scanner:Line(1) or ""
-    end
+  -- Get effect from Blizzard UnitDebuff (source of truth for slot existence)
+  if texture then
+    scanner:SetUnitDebuff(unit, id)
+    effect = scanner:Line(1) or ""
   end
 
   -- Nampower: Check slots with allSlots
@@ -1448,20 +1471,57 @@ function libdebuff:UnitDebuff(unit, id)
     else
       -- allSlots exists but this slot is missing — trigger a throttled rescan
       -- (happens when debuff was pre-existing before target acquired, DEBUFF_ADDED never fired)
-      if guid and GetUnitField and SpellInfo then
+      if guid and GetUnitField and SpellInfo and effect then
         local now = GetTime()
-        if not lastRescanTime[guid] or (now - lastRescanTime[guid]) > RESCAN_THROTTLE then
-          lastRescanTime[guid] = now
-          if debugStats.enabled and IsCurrentTarget(guid) then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[ALLSLOTS MISSING]|r slot=%d effect=%s - triggering rescan", id, tostring(effect)))
+        
+        -- CRITICAL CHECK: Is this effect actually in allSlots somewhere?
+        -- If YES: GetUnitField has stale SLOT NUMBER (WoW doesn't auto-shift!) → SKIP rescan
+        -- If NO: Effect is missing from allSlots (new debuff) → Trigger rescan
+        local effectExistsInAllSlots = false
+        if allSlots[guid] then
+          for slot, slotData in pairs(allSlots[guid]) do
+            if slotData.spellName == effect then
+              effectExistsInAllSlots = true
+              break
+            end
           end
-          InitializeTargetSlots(guid)
+        end
+        
+        -- Only trigger rescan if effect DOESN'T exist in allSlots (real new debuff)
+        -- Skip if effect exists (stale GetUnitField slot number)
+        if not effectExistsInAllSlots then
+          -- GRACE PERIOD: Suppress rescans for 0.5s after DEBUFF_REMOVED
+          -- This prevents rescan spam when our ShiftSlotsDown runs but WoW's API
+          -- still returns old slot numbers for a few frames
+          local timeSinceRemoval = recentRemovals[guid] and (now - recentRemovals[guid]) or 999
+          if timeSinceRemoval < 0.5 then
+            if debugStats.enabled and IsCurrentTarget(guid) then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[ALLSLOTS MISSING SUPPRESSED]|r slot=%d effect=%s - grace period (%.2fs since removal)", 
+                id, tostring(effect), timeSinceRemoval))
+            end
+            return nil  -- Suppress rescan during grace period
+          end
+          
+          if not lastRescanTime[guid] or (now - lastRescanTime[guid]) > RESCAN_THROTTLE then
+            lastRescanTime[guid] = now
+            if debugStats.enabled and IsCurrentTarget(guid) then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff9900[ALLSLOTS MISSING]|r slot=%d effect=%s - triggering rescan", id, tostring(effect)))
+            end
+            InitializeTargetSlots(guid)
+          end
+        elseif debugStats.enabled and IsCurrentTarget(guid) then
+          -- GetUnitField has stale slot number - effect exists in different slot
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff888888[STALE SLOT NUMBER]|r slot=%d effect=%s - exists in allSlots, skipping rescan", 
+            id, tostring(effect)))
         end
       end
+      -- If allSlots exists, don't fall back to libdebuff.objects
+      -- (prevents showing stale slot data after WoW doesn't auto-shift slots)
+      return nil
     end
   end
 
-  -- read level based debuff table
+  -- read level based debuff table (ONLY if allSlots doesn't exist)
   local data = libdebuff.objects[unitname] and libdebuff.objects[unitname][unitlevel]
   data = data or libdebuff.objects[unitname] and libdebuff.objects[unitname][0]
 
@@ -1495,7 +1555,9 @@ function libdebuff:UnitOwnDebuff(unit, id)
     if guid and ownDebuffs[guid] then
       for k in pairs(cache) do cache[k] = nil end
       
-      local count = 1
+      -- CRITICAL FIX: Build sorted list by slot number instead of using pairs()
+      -- pairs() does NOT guarantee slot order, causing debuffs to appear in wrong positions
+      local sortedDebuffs = {}
       local toDelete = {}
       
       for spellName, data in pairs(ownDebuffs[guid]) do
@@ -1506,18 +1568,28 @@ function libdebuff:UnitOwnDebuff(unit, id)
         -- This prevents showing timers for spells like Rake where the bleed is immune
         -- (AURA_CAST fires but DEBUFF_ADDED never fires = slot stays nil)
         if data.slot and timeleft > -1 then
-          cache[spellName] = true
-          if count == id then
-            local texture = data.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
-            -- Return 0 for timeleft if expired, but keep it in the list
-            local displayTimeleft = timeleft > 0 and timeleft or 0
-            return spellName, data.rank, texture, 1, nil, data.duration, displayTimeleft, "player"
-          end
-          count = count + 1
+          table.insert(sortedDebuffs, {
+            spellName = spellName,
+            data = data,
+            timeleft = timeleft
+          })
         else
           -- Mark for deletion AFTER iteration (prevents iterator corruption)
           table.insert(toDelete, spellName)
         end
+      end
+      
+      -- Sort by slot number (ascending)
+      table.sort(sortedDebuffs, function(a, b)
+        return a.data.slot < b.data.slot
+      end)
+      
+      -- Return debuff at position 'id' based on SORTED order
+      if sortedDebuffs[id] then
+        local entry = sortedDebuffs[id]
+        local texture = entry.data.texture or "Interface\\Icons\\INV_Misc_QuestionMark"
+        local displayTimeleft = entry.timeleft > 0 and entry.timeleft or 0
+        return entry.spellName, entry.data.rank, texture, 1, nil, entry.data.duration, displayTimeleft, "player"
       end
       
       -- Delete expired entries AFTER iteration
@@ -1559,8 +1631,11 @@ if hasNampower then
   frame:RegisterEvent("PLAYER_COMBO_POINTS")
   frame:RegisterEvent("PLAYER_TALENT_UPDATE")
   frame:RegisterEvent("PLAYER_LOGOUT")
+  frame:RegisterEvent("SPELL_START_SELF")
+  frame:RegisterEvent("SPELL_START_OTHER")
   frame:RegisterEvent("SPELL_GO_SELF")
   frame:RegisterEvent("SPELL_GO_OTHER")
+  frame:RegisterEvent("SPELL_FAILED_OTHER")
   frame:RegisterEvent("AURA_CAST_ON_SELF")
   frame:RegisterEvent("AURA_CAST_ON_OTHER")
   frame:RegisterEvent("DEBUFF_ADDED_OTHER")
@@ -2003,6 +2078,31 @@ if hasNampower then
         stacks = 1
       }
       
+    elseif event == "SPELL_START_SELF" or event == "SPELL_START_OTHER" then
+      local itemId = arg1
+      local spellId = arg2
+      local casterGuid = arg3
+      local targetGuid = arg4
+      local castFlags = arg5
+      local castTime = arg6  -- in milliseconds
+      
+      if not casterGuid or not spellId then return end
+      
+      -- Get spell name and icon
+      local spellName = SpellInfo and SpellInfo(spellId) or nil
+      local icon = libdebuff:GetSpellIcon(spellId)
+      
+      -- Store cast info for nameplates
+      pfUI.libdebuff_casts[casterGuid] = {
+        spellID = spellId,  -- uppercase ID for consistency with nameplates
+        spellName = spellName,
+        icon = icon,
+        startTime = GetTime(),
+        duration = castTime and castTime / 1000 or 0,
+        endTime = castTime and (GetTime() + castTime / 1000) or nil,
+        event = "START"
+      }
+      
     elseif event == "SPELL_GO_SELF" or event == "SPELL_GO_OTHER" then
       local itemId = arg1
       local spellId = arg2
@@ -2011,6 +2111,11 @@ if hasNampower then
       local castFlags = arg5
       local numTargetsHit = arg6
       local numTargetsMissed = arg7
+      
+      -- Clear cast info for nameplates
+      if casterGuid and pfUI.libdebuff_casts[casterGuid] then
+        pfUI.libdebuff_casts[casterGuid] = nil
+      end
       
       -- Nur erfolgreiche Casts (mindestens 1 Target getroffen, keine Misses)
       if numTargetsMissed > 0 or numTargetsHit == 0 then return end
@@ -2036,11 +2141,31 @@ if hasNampower then
         }
       end
       
+    elseif event == "SPELL_FAILED_OTHER" then
+      local casterGuid = arg1
+      local spellId = arg2
+      
+      -- Clear cast info for nameplates (movement cancel, interrupted, etc.)
+      if casterGuid and pfUI.libdebuff_casts[casterGuid] then
+        pfUI.libdebuff_casts[casterGuid] = nil
+      end
+      
     elseif event == "DEBUFF_ADDED_OTHER" then
       local guid, slot, spellId, stacks = arg1, arg2, arg3, arg4
       
       local spellName = SpellInfo and SpellInfo(spellId)
       if not spellName then return end
+      
+      -- DEDUPLICATION
+      local now = GetTime()
+      lastProcessedDebuff[guid] = lastProcessedDebuff[guid] or {}
+      lastProcessedDebuff[guid][slot] = lastProcessedDebuff[guid][slot] or {}
+      
+      if lastProcessedDebuff[guid][slot][spellName] == now then
+        return
+      end
+      
+      lastProcessedDebuff[guid][slot][spellName] = now
       
       -- If unit is dead, cleanup and skip processing (defensive fallback)
       if UnitIsDead and UnitIsDead(guid) then
@@ -2101,11 +2226,7 @@ if hasNampower then
         end
       end
       
-      -- Debug: Show DEBUFF_ADDED with target and caster
-      if debugStats.enabled and IsCurrentTarget(guid) then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[DEBUFF_ADDED]|r slot=%d %s target=%s caster=%s stacks=%d", 
-          GetDebugTimestamp(), slot, spellName, DebugGuid(guid), DebugGuid(casterGuid), stacks))
-      end
+      -- Debug: Show DEBUFF_ADDED (disabled - too spammy)
       
       -- Warn if casterGuid remains unknown
       if not casterGuid and debugStats.enabled and IsCurrentTarget(guid) then
@@ -2302,10 +2423,7 @@ if hasNampower then
           return
         end
         
-        if debugStats.enabled and IsCurrentTarget(guid) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[DEBUFF_REMOVED]|r slot=%d %s target=%s caster=%s", 
-            GetDebugTimestamp(), slot, spellName, DebugGuid(guid), DebugGuid(removedCasterGuid)))
-        end
+        -- Debug: Show DEBUFF_REMOVED (disabled - too spammy)
         
         -- Also remove from allAuraCasts - use removedSpellName from slotData!
         -- BUT: Check age first to avoid removing during rank changes/refreshes
@@ -2347,6 +2465,11 @@ if hasNampower then
         end
         
         allSlots[guid][slot] = nil
+        
+        -- Cleanup deduplication tracking for this slot
+        if lastProcessedDebuff[guid] and lastProcessedDebuff[guid][slot] then
+          lastProcessedDebuff[guid][slot] = nil
+        end
       else
         -- Slot is already empty - log this!
         if debugStats.enabled and IsCurrentTarget(guid) then
@@ -2355,6 +2478,10 @@ if hasNampower then
         end
       end
       
+      -- CRITICAL: Shift down IMMEDIATELY after deletion to maintain atomicity!
+      -- This prevents race conditions where UI refreshes between deletion and shift
+      ShiftSlotsDown(guid, slot)
+      
       if debugStats.enabled then
         if wasOurs then
           debugStats.debuff_removed_ours = debugStats.debuff_removed_ours + 1
@@ -2362,9 +2489,6 @@ if hasNampower then
           debugStats.debuff_removed_other = debugStats.debuff_removed_other + 1
         end
       end
-      
-      -- ALWAYS shift down (affects all slots)
-      ShiftSlotsDown(guid, slot)
       
       -- Mark this GUID as having recent removal (suppress rescans for 0.5s)
       recentRemovals[guid] = GetTime()
