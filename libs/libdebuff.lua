@@ -176,6 +176,12 @@ local iconCache = pfUI.libdebuff_icon_cache
 -- Shared with nameplates for cast-bar display
 pfUI.libdebuff_casts = pfUI.libdebuff_casts or {}
 
+-- Deduplication
+if not lastProcessedDebuff then lastProcessedDebuff = {} end
+
+-- Track last DEBUFF_REMOVED time per GUID for debug output
+if not lastDebuffRemoved then lastDebuffRemoved = {} end
+
 -- StaticPopup for Nampower version warning
 StaticPopupDialogs["LIBDEBUFF_NAMPOWER_UPDATE"] = {
   text = "Nampower Update Required!\n\nYour current version: %s\nRequired version: 2.27.2+\n\nReason: SPELL_FAILED_OTHER bug fix needed for cast-bar cancel detection.\n\nPlease update Nampower!",
@@ -376,13 +382,7 @@ end
 
 -- Shift all slots down after a removal
 local function ShiftSlotsDown(guid, removedSlot)
-  if debugStats.enabled then
-    debugStats.shift_down = debugStats.shift_down + 1
-    if IsCurrentTarget(guid) then
-      DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[SHIFT DOWN]|r target=%s removed slot %d, shifting slots %d+ down", 
-        DebugGuid(guid), removedSlot, removedSlot + 1))
-    end
-  end
+  -- Debug: SHIFT DOWN (disabled - too spammy)
   
   -- Shift ownSlots (only our debuffs)
   if ownSlots[guid] then
@@ -1508,10 +1508,13 @@ function libdebuff:UnitDebuff(unit, id)
           InitializeTargetSlots(guid)
         end
       end
+      -- If allSlots exists, don't fall back to libdebuff.objects
+      -- (prevents showing stale slot data after WoW doesn't auto-shift slots)
+      return nil
     end
   end
 
-  -- read level based debuff table
+  -- read level based debuff table (ONLY if allSlots doesn't exist)
   local data = libdebuff.objects[unitname] and libdebuff.objects[unitname][unitlevel]
   data = data or libdebuff.objects[unitname] and libdebuff.objects[unitname][0]
 
@@ -2134,6 +2137,17 @@ if hasNampower then
       local spellName = SpellInfo and SpellInfo(spellId)
       if not spellName then return end
       
+      -- DEDUPLICATION
+      local now = GetTime()
+      lastProcessedDebuff[guid] = lastProcessedDebuff[guid] or {}
+      lastProcessedDebuff[guid][slot] = lastProcessedDebuff[guid][slot] or {}
+      
+      if lastProcessedDebuff[guid][slot][spellName] == now then
+        return
+      end
+      
+      lastProcessedDebuff[guid][slot][spellName] = now
+      
       -- If unit is dead, cleanup and skip processing (defensive fallback)
       if UnitIsDead and UnitIsDead(guid) then
         CleanupUnit(guid)
@@ -2193,11 +2207,7 @@ if hasNampower then
         end
       end
       
-      -- Debug: Show DEBUFF_ADDED with target and caster
-      if debugStats.enabled and IsCurrentTarget(guid) then
-        DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[DEBUFF_ADDED]|r slot=%d %s target=%s caster=%s stacks=%d", 
-          GetDebugTimestamp(), slot, spellName, DebugGuid(guid), DebugGuid(casterGuid), stacks))
-      end
+      -- Debug: Show DEBUFF_ADDED (disabled - too spammy)
       
       -- Warn if casterGuid remains unknown
       if not casterGuid and debugStats.enabled and IsCurrentTarget(guid) then
@@ -2394,10 +2404,7 @@ if hasNampower then
           return
         end
         
-        if debugStats.enabled and IsCurrentTarget(guid) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[DEBUFF_REMOVED]|r slot=%d %s target=%s caster=%s", 
-            GetDebugTimestamp(), slot, spellName, DebugGuid(guid), DebugGuid(removedCasterGuid)))
-        end
+        -- Debug: Show DEBUFF_REMOVED (disabled - too spammy)
         
         -- Also remove from allAuraCasts - use removedSpellName from slotData!
         -- BUT: Check age first to avoid removing during rank changes/refreshes
@@ -2460,6 +2467,11 @@ if hasNampower then
       
       -- Mark this GUID as having recent removal (suppress rescans for 0.5s)
       recentRemovals[guid] = GetTime()
+      
+      -- Cleanup lastProcessedDebuff
+      if lastProcessedDebuff[guid] and lastProcessedDebuff[guid][slot] then
+        lastProcessedDebuff[guid][slot] = nil
+      end
       
       -- Cleanup
       CleanupOrphanedDebuffs(guid)
