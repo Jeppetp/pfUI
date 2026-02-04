@@ -985,7 +985,16 @@ pfUI:RegisterModule("actionbar", "vanilla", function ()
     pageswitch:RegisterEvent("PLAYER_AURAS_CHANGED")
     pageswitch:RegisterEvent("PLAYER_ENTERING_WORLD")
     pageswitch:RegisterEvent("UNIT_CASTEVENT")
+    pageswitch:RegisterEvent("PLAYER_LOGOUT")
     pageswitch:SetScript("OnEvent", function()
+      -- Handle shutdown to prevent crash 132
+      if event == "PLAYER_LOGOUT" then
+        this:UnregisterAllEvents()
+        this:SetScript("OnEvent", nil)
+        this:SetScript("OnUpdate", nil)
+        return
+      end
+      
       if class ~= "DRUID" then return end
       
       -- On login/reload: full scan
@@ -1233,8 +1242,8 @@ pfUI:RegisterModule("actionbar", "vanilla", function ()
     f.count:SetJustifyH("RIGHT")
     f.count:SetJustifyV("BOTTOM")
 
-    -- macro spell scan
-    if C.bars.macroscan == "0" then
+    -- macro spell scan (disabled when macro addons are loaded)
+    if C.bars.macroscan == "0" or pfUI:MacroAddonsLoaded() then
       f.scanmacro, f.spellslot, f.booktype = nil, nil, nil
     else
       f.scanmacro = true
