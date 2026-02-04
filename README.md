@@ -1,41 +1,16 @@
-# pfUI - Turtle WoW Enhanced Edition (Experiment Branch)
+# pfUI - Turtle WoW Enhanced Edition 
 
-[![Version](https://img.shields.io/badge/version-7.6.0--experimental-red.svg)](https://github.com/me0wg4ming/pfUI)
+[![Version](https://img.shields.io/badge/version-7.6.0-green.svg)](https://github.com/me0wg4ming/pfUI)
 [![Turtle WoW](https://img.shields.io/badge/Turtle%20WoW-1.18.0-brightgreen.svg)](https://turtlecraft.gg/)
 [![SuperWoW](https://img.shields.io/badge/SuperWoW-REQUIRED-purple.svg)](https://github.com/balakethelock/SuperWoW)
 [![Nampower](https://img.shields.io/badge/Nampower-REQUIRED-yellow.svg)](https://gitea.com/avitasia/nampower)
 [![UnitXP](https://img.shields.io/badge/UnitXP__SP3-Optional-yellow.svg)](https://codeberg.org/konaka/UnitXP_SP3)
 
-**⚠️ EXPERIMENTAL BUILD - Use at your own risk! ⚠️**
-
-This is an experimental pfUI fork with a **complete rewrite of the debuff tracking system**. It offers significant performance improvements for debuff timers but has higher complexity.
-
 **Requires:** SuperWoW + Nampower DLL for full functionality!
 
-> **Looking for stable version?** Use Master branch: [https://github.com/me0wg4ming/pfUI](https://github.com/me0wg4ming/pfUI)
 
 ---
 
-## 🚨 Important Warnings
-
-### This Build Is EXPERIMENTAL
-
-**Known Issues:**
-- ❌ Not fully tested in 40-man raids
-- ❌ Higher code complexity = more potential bugs
-
-**Use This Build If:**
-- ✅ You have SuperWoW + Nampower installed
-- ✅ You want improved debuff tracking performance
-- ✅ You're willing to test and report bugs
-- ✅ You play Druid/Rogue (combo point finishers benefit most)
-
-**Use Master If:**
-- ✅ You want a stable, battle-tested build
-- ✅ You don't have Nampower
-- ✅ You prefer reliability over bleeding-edge features
-
----
 
 ## 🎯 What's New in Version 7.6.0 (February 3, 2026)
 
