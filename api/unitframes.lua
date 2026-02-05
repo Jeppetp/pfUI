@@ -257,13 +257,46 @@ function pfUI.api.GetUnitStats(unitstr, trackStats)
   local hp, maxHp, power, maxPower, powerType
   local usedNampower = false
   
-  -- Try Nampower first if available
+  -- For NPCs/Mobs (everything that's NOT a player AND NOT a pet): Skip Nampower, use Blizzard API only
+  -- Pets should use Nampower for better accuracy (power3=focus, power5=happiness)
+  -- Proper pet check: UnitPlayerControlled = true for pets and players, UnitIsPlayer = false for pets
+  local isPet = UnitPlayerControlled(unitstr) and not UnitIsPlayer(unitstr)
+
+  if unitstr and UnitExists(unitstr) and not UnitIsPlayer(unitstr) and not isPet then
+    hp = UnitHealth(unitstr) or 0
+    maxHp = UnitHealthMax(unitstr) or 1
+    powerType = UnitPowerType(unitstr) or 0
+    power = UnitMana(unitstr) or 0
+    maxPower = UnitManaMax(unitstr) or 1
+
+    -- Track as fallback usage
+    if trackStats then
+      if pfUI.uf and pfUI.uf.stats and pfUI.uf.stats.enabled then
+        local lastStats = pfUI.api.lastUnitStats[unitstr]
+        if not lastStats or lastStats.hp ~= hp or lastStats.maxHp ~= maxHp or
+           lastStats.power ~= power or lastStats.maxPower ~= maxPower then
+          pfUI.uf.stats.fallbackUsed = (pfUI.uf.stats.fallbackUsed or 0) + 1
+          pfUI.api.lastUnitStats[unitstr] = {
+            hp = hp,
+            maxHp = maxHp,
+            power = power,
+            maxPower = maxPower
+          }
+        end
+      end
+    end
+
+    return hp, maxHp, power, maxPower, powerType
+  end
+
+  -- Try Nampower first if available (for players AND pets now)
   if GetUnitField then
     -- Use the standard check first, then get guid separately
     local exists = _G.UnitExists(unitstr)
     if exists then
       -- Get guid via the extended UnitExists for Nampower
       local _, guid = _G.UnitExists(unitstr)
+
       if guid then
         hp = GetUnitField(guid, "health")
         maxHp = GetUnitField(guid, "maxHealth")
@@ -288,6 +321,11 @@ function pfUI.api.GetUnitStats(unitstr, trackStats)
           power = GetUnitField(guid, "power4") or UnitMana(unitstr)
           if power then power = math.floor(power) end
           maxPower = GetUnitField(guid, "maxPower4") or UnitManaMax(unitstr)
+        elseif powerType == 2 then
+          -- Focus (Hunter pets use power3)
+          power = GetUnitField(guid, "power3") or UnitMana(unitstr)
+          if power then power = math.floor(power) end
+          maxPower = GetUnitField(guid, "maxPower3") or UnitManaMax(unitstr)
         else
           -- Mana (default)
           power = GetUnitField(guid, "power1") or UnitMana(unitstr)
@@ -319,7 +357,7 @@ function pfUI.api.GetUnitStats(unitstr, trackStats)
     end
   end
   
-  -- Fallback to standard API
+  -- Fallback to standard API (for players when Nampower fails)
   hp = UnitHealth(unitstr) or 0
   maxHp = UnitHealthMax(unitstr) or 1
   powerType = UnitPowerType(unitstr) or 0
@@ -2586,9 +2624,16 @@ function pfUI.uf:RefreshUnit(unit, component)
       unit.hpCenterText:SetText(pfUI.uf:GetStatusValue(unit, "hpcenter"))
       unit.hpRightText:SetText(pfUI.uf:GetStatusValue(unit, "hpright"))
 
-      unit.powerLeftText:SetText(pfUI.uf:GetStatusValue(unit, "powerleft"))
-      unit.powerCenterText:SetText(pfUI.uf:GetStatusValue(unit, "powercenter"))
-      unit.powerRightText:SetText(pfUI.uf:GetStatusValue(unit, "powerright"))
+      -- Hide power text for NPCs without power (maxPower == 0)
+      if powermax == 0 then
+        unit.powerLeftText:SetText("")
+        unit.powerCenterText:SetText("")
+        unit.powerRightText:SetText("")
+      else
+        unit.powerLeftText:SetText(pfUI.uf:GetStatusValue(unit, "powerleft"))
+        unit.powerCenterText:SetText(pfUI.uf:GetStatusValue(unit, "powercenter"))
+        unit.powerRightText:SetText(pfUI.uf:GetStatusValue(unit, "powerright"))
+      end
 
       if UnitIsTapped(unitstr) and not UnitIsTappedByPlayer(unitstr) then
         unit.hp.bar:SetStatusBarColor(.5,.5,.5,.5)

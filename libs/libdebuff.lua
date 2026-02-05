@@ -1213,7 +1213,11 @@ if hasNampower then
       
       -- CP-based spells: Force duration=0 for others (unknown!)
       if not isOurs and combopointAbilities[spellName] then
-        duration = 0
+        if spellName == "Expose Armor" then
+          duration = 30  -- Fixed duration for Expose Armor
+        else
+          duration = 0
+        end
       end
       
       -- Store in allAuraCasts
@@ -1551,9 +1555,13 @@ if hasNampower then
           removedCasterGuid = ownership.casterGuid
         end
         
-        -- Clear both mappings
-        slotOwnership[guid][foundAuraSlot] = nil
-        displayToAura[guid][displaySlot] = nil
+        -- Clear both mappings (with nil-checks)
+        if slotOwnership[guid] then
+          slotOwnership[guid][foundAuraSlot] = nil
+        end
+        if displayToAura[guid] then
+          displayToAura[guid][displaySlot] = nil
+        end
         
         if debugStats.enabled and IsCurrentTarget(guid) then
           DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff9900[SLOT CLEARED]|r aura=%d %s wasOurs=%s caster=%s", 
