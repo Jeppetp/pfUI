@@ -1218,6 +1218,7 @@ if hasNampower then
         else
           duration = 0
         end
+      end
       
       -- Store in allAuraCasts
       if targetGuid and targetGuid ~= "" and targetGuid ~= "0x0000000000000000" then
