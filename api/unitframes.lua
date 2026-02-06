@@ -257,7 +257,7 @@ function pfUI.api.GetUnitStats(unitstr, trackStats)
   local hp, maxHp, power, maxPower, powerType
   local usedNampower = false
   
-  
+
   -- Try GetUnitField first if available (for all units: players, pets, NPCs)
   if GetUnitField then
     -- Use the standard check first, then get guid separately
@@ -265,7 +265,7 @@ function pfUI.api.GetUnitStats(unitstr, trackStats)
     if exists then
       -- Get guid via the extended UnitExists for Nampower
       local _, guid = _G.UnitExists(unitstr)
-      
+
       if guid then
         hp = GetUnitField(guid, "health")
         maxHp = GetUnitField(guid, "maxHealth")
@@ -295,7 +295,6 @@ function pfUI.api.GetUnitStats(unitstr, trackStats)
           power = GetUnitField(guid, "power3") or UnitMana(unitstr)
           if power then power = math.floor(power) end
           maxPower = GetUnitField(guid, "maxPower3") or UnitManaMax(unitstr)
-          
         else
           -- Mana (default)
           power = GetUnitField(guid, "power1") or UnitMana(unitstr)
