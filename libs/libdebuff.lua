@@ -1067,11 +1067,12 @@ if hasNampower then
         end
       end
       
-      -- Trigger UI updates
-      slotMapCache[targetGuid] = nil
+      -- NO cache invalidation! Slots don't change during refresh.
+      -- Slot mappings (displayToAura, slotOwnership) remain valid.
+      -- This matches the old version's behavior.
       
       if pfUI.nameplates and pfUI.nameplates.OnAuraUpdate then
-        pfUI.nameplates:OnAuraUpdate(targetGuid)
+        pfUI.nameplates:OnAuraUpdate(targetGuid, true)  -- forceRefresh = true
       end
       
       if UnitExists("target") then
@@ -1156,10 +1157,11 @@ if hasNampower then
         
         -- Only update UI when something was actually refreshed
         if refreshed then
-          slotMapCache[targetGuid] = nil
+          -- NO cache invalidation needed - slots don't change during timer refresh
           
+          -- Force nameplate cooldown refresh (bypasses 0.5s threshold)
           if pfUI.nameplates and pfUI.nameplates.OnAuraUpdate then
-            pfUI.nameplates:OnAuraUpdate(targetGuid)
+            pfUI.nameplates:OnAuraUpdate(targetGuid, true)  -- forceRefresh = true
           end
           
           if UnitExists("target") then
@@ -1228,6 +1230,14 @@ if hasNampower then
       local numHit = arg6 or 0
       local numMissed = arg7 or 0
       
+      if debugStats.enabled and SpellInfo then
+        local spellName = SpellInfo(spellId)
+        if spellName and IsCurrentTarget(targetGuid or casterGuid) then
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ccff[SPELL_GO]|r %s caster=%s target=%s numHit=%d numMissed=%d", 
+            GetDebugTimestamp(), spellName, DebugGuid(casterGuid), DebugGuid(targetGuid), numHit, numMissed))
+        end
+      end
+      
       -- Clear cast bar only if SPELL_GO matches the active cast
       -- (Reactive procs like Frost Armor trigger SPELL_GO but shouldn't clear the castbar)
       if casterGuid and pfUI.libdebuff_casts[casterGuid] then
@@ -1252,6 +1262,55 @@ if hasNampower then
               rank = aoeRank,
               time = GetTime()
             }
+            
+            if debugStats.enabled then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00cc[PENDING AOE]|r %s stored caster=%s", 
+                GetDebugTimestamp(), aoeName, DebugGuid(casterGuid)))
+            end
+            
+            -- CRITICAL: If this AoE spell is already active, refresh it immediately!
+            -- This handles recast scenarios (e.g. casting Consecration while one is already running)
+            -- Find all targets with this debuff from this caster and refresh their timers
+            local refreshedTargets = 0
+            for guid, spellTable in pairs(allAuraCasts) do
+              if spellTable[aoeName] and spellTable[aoeName][casterGuid] then
+                local data = spellTable[aoeName][casterGuid]
+                local timeleft = (data.startTime + data.duration) - GetTime()
+                
+                -- Only refresh if still active (or recently expired)
+                if timeleft > -1 then
+                  local forcedDur = libspelldata:GetDuration(aoeName)
+                  if forcedDur and forcedDur > 0 then
+                    local now = GetTime()
+                    data.startTime = now
+                    data.duration = forcedDur
+                    refreshedTargets = refreshedTargets + 1
+                    
+                    -- Also refresh ownDebuffs if it's ours
+                    local myGuid = GetPlayerGUID()
+                    if casterGuid == myGuid and ownDebuffs[guid] and ownDebuffs[guid][aoeName] then
+                      ownDebuffs[guid][aoeName].startTime = now
+                      ownDebuffs[guid][aoeName].duration = forcedDur
+                    end
+                    
+                    if debugStats.enabled and IsCurrentTarget(guid) then
+                      DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[AOE REFRESH]|r %s on %s refreshed by SPELL_GO", 
+                        GetDebugTimestamp(), aoeName, DebugGuid(guid)))
+                    end
+                    
+                    -- Trigger nameplate update with forceRefresh
+                    if pfUI.nameplates and pfUI.nameplates.OnAuraUpdate then
+                      pfUI.nameplates:OnAuraUpdate(guid, true)
+                    end
+                  end
+                end
+              end
+            end
+            
+            if debugStats.enabled and refreshedTargets > 0 then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[AOE REFRESH]|r %s refreshed %d target(s)", 
+                GetDebugTimestamp(), aoeName, refreshedTargets))
+            end
           end
         end
         -- Clear captured CPs on miss/dodge/parry
@@ -1624,8 +1683,51 @@ if hasNampower then
       -- AoE spells (Hurricane, Consecration): no targetGuid in SPELL_GO
       if not casterGuid and pendingAoE[spellName] then
         local pending = pendingAoE[spellName]
-        if GetTime() - pending.time < 2.0 then  -- wider window for AoE (ticks hit over time)
+        if GetTime() - pending.time < 0.05 then  -- 50ms window - events fire instantly
           casterGuid = pending.casterGuid
+          
+          if debugStats.enabled and IsCurrentTarget(guid) then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00cc[AOE CASTER FOUND]|r %s from pendingAoE caster=%s age=%.2fs", 
+              GetDebugTimestamp(), spellName, DebugGuid(casterGuid), GetTime() - pending.time))
+          end
+        elseif debugStats.enabled and IsCurrentTarget(guid) then
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[AOE EXPIRED]|r %s pendingAoE too old age=%.2fs", 
+            GetDebugTimestamp(), spellName, GetTime() - pending.time))
+        end
+      elseif not casterGuid and debugStats.enabled and IsCurrentTarget(guid) and libspelldata and libspelldata:HasForcedDuration(spellName) then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[AOE MISSING]|r %s no pendingAoE entry found!", 
+          GetDebugTimestamp(), spellName))
+      end
+      
+      -- Fallback for forced-duration AoE spells: Check if we already have a timer for this spell
+      -- This handles Consecration ticks that come after pendingAoE has expired
+      if not casterGuid and libspelldata and libspelldata:HasForcedDuration(spellName) then
+        if allAuraCasts[guid] and allAuraCasts[guid][spellName] then
+          -- Find the most recent active caster for this spell
+          local mostRecentTime = 0
+          local mostRecentCaster = nil
+          for casterId, data in pairs(allAuraCasts[guid][spellName]) do
+            local timeleft = (data.startTime + data.duration) - GetTime()
+            if timeleft > -1 and data.startTime > mostRecentTime then  -- grace period
+              mostRecentTime = data.startTime
+              mostRecentCaster = casterId
+            end
+          end
+          
+          if mostRecentCaster then
+            casterGuid = mostRecentCaster
+            
+            -- Check if it's ours
+            local myGuid = GetPlayerGUID()
+            if myGuid and casterGuid == myGuid then
+              isOurs = true
+            end
+            
+            if debugStats.enabled and IsCurrentTarget(guid) then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[AOE FALLBACK]|r %s found existing caster=%s isOurs=%s", 
+                GetDebugTimestamp(), spellName, DebugGuid(casterGuid), tostring(isOurs)))
+            end
+          end
         end
       end
       
@@ -1684,35 +1786,55 @@ if hasNampower then
       -- libspelldata: Create timer for forced-duration spells (no AURA_CAST fires)
       -- e.g. Judgement of Wisdom: DEBUFF_ADDED is the only event, create timer here
       if libspelldata and libspelldata:HasForcedDuration(spellName) and casterGuid then
-        local forcedDur = libspelldata:GetDuration(spellName)
-        if forcedDur and forcedDur > 0 then
-          local now = GetTime()
-          local texture = libdebuff:GetSpellIcon(spellId)
+        -- Check if we already have a timer from AOE REFRESH (SPELL_GO)
+        local hasExistingTimer = false
+        if allAuraCasts[guid] and allAuraCasts[guid][spellName] and allAuraCasts[guid][spellName][casterGuid] then
+          local existingData = allAuraCasts[guid][spellName][casterGuid]
+          local existingTimeleft = (existingData.startTime + existingData.duration) - GetTime()
           
-          -- Store in allAuraCasts
-          allAuraCasts[guid] = allAuraCasts[guid] or {}
-          allAuraCasts[guid][spellName] = allAuraCasts[guid][spellName] or {}
-          allAuraCasts[guid][spellName][casterGuid] = {
-            startTime = now,
-            duration = forcedDur,
-            rank = 0
-          }
-          
-          -- Store in ownDebuffs if ours
-          if isOurs then
-            ownDebuffs[guid] = ownDebuffs[guid] or {}
-            ownDebuffs[guid][spellName] = {
+          -- If timer is still valid and was recently refreshed (within last 10s), use it
+          if existingTimeleft > 0 and (GetTime() - existingData.startTime) < 10 then
+            hasExistingTimer = true
+            
+            if debugStats.enabled and IsCurrentTarget(guid) then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ff00[TIMER EXISTS]|r %s using existing timer (%.1fs left)", 
+                spellName, existingTimeleft))
+            end
+          end
+        end
+        
+        -- Only create new timer if we don't have one already
+        if not hasExistingTimer then
+          local forcedDur = libspelldata:GetDuration(spellName)
+          if forcedDur and forcedDur > 0 then
+            local now = GetTime()
+            local texture = libdebuff:GetSpellIcon(spellId)
+            
+            -- Store in allAuraCasts
+            allAuraCasts[guid] = allAuraCasts[guid] or {}
+            allAuraCasts[guid][spellName] = allAuraCasts[guid][spellName] or {}
+            allAuraCasts[guid][spellName][casterGuid] = {
               startTime = now,
               duration = forcedDur,
-              texture = texture,
-              rank = 0,
-              spellId = spellId
+              rank = 0
             }
-          end
-          
-          if debugStats.enabled and IsCurrentTarget(guid) then
-            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[FORCED TIMER]|r %s dur=%.1f caster=%s", 
-              spellName, forcedDur, DebugGuid(casterGuid)))
+            
+            -- Store in ownDebuffs if ours
+            if isOurs then
+              ownDebuffs[guid] = ownDebuffs[guid] or {}
+              ownDebuffs[guid][spellName] = {
+                startTime = now,
+                duration = forcedDur,
+                texture = texture,
+                rank = 0,
+                spellId = spellId
+              }
+            end
+            
+            if debugStats.enabled and IsCurrentTarget(guid) then
+              DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff00ff[FORCED TIMER]|r %s dur=%.1f caster=%s", 
+                spellName, forcedDur, DebugGuid(casterGuid)))
+            end
           end
         end
       end
@@ -1824,8 +1946,25 @@ if hasNampower then
         if allAuraCasts[guid][spellName][removedCasterGuid] then
           local auraData = allAuraCasts[guid][spellName][removedCasterGuid]
           local age = GetTime() - auraData.startTime
-          -- Only delete if not recently refreshed
-          if age > 1 then
+          
+          -- CRITICAL: Don't delete if this is an AoE spell with pending recast
+          -- This prevents timer loss during the DEBUFF_REMOVED → DEBUFF_ADDED gap
+          local isPendingRecast = false
+          if libspelldata and libspelldata:HasForcedDuration(spellName) and pendingAoE[spellName] then
+            local pending = pendingAoE[spellName]
+            -- Check if pending is from same caster and recent (within last 10s)
+            if pending.casterGuid == removedCasterGuid and (GetTime() - pending.time) < 10 then
+              isPendingRecast = true
+              
+              if debugStats.enabled and IsCurrentTarget(guid) then
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[AOE RECAST]|r %s timer preserved (pending recast detected)", 
+                  GetDebugTimestamp(), spellName))
+              end
+            end
+          end
+          
+          -- Only delete if not recently refreshed AND no pending recast
+          if age > 1 and not isPendingRecast then
             allAuraCasts[guid][spellName][removedCasterGuid] = nil
           end
         end
