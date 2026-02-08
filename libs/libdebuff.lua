@@ -605,9 +605,15 @@ local function CleanupOutOfRangeUnits()
     end
   end
   
-  -- Cleanup old pendingAoE
-  for spell, data in pairs(pendingAoE) do
-    if now - data.time > 12 then  -- AoE channels can last up to 10s
+  -- Cleanup old pendingAoE (now supports multiple casters per spell)
+  for spell, casters in pairs(pendingAoE) do
+    for casterGuid, data in pairs(casters) do
+      if now - data.time > 12 then  -- AoE channels can last up to 10s
+        pendingAoE[spell][casterGuid] = nil
+      end
+    end
+    -- Remove empty spell entries
+    if next(pendingAoE[spell]) == nil then
       pendingAoE[spell] = nil
     end
   end
@@ -881,10 +887,13 @@ end
 -- API: UnitOwnDebuff (only OUR debuffs)
 -- ============================================================================
 
--- Pre-defined sort function for UnitOwnDebuff (avoids closure creation per call)
+-- Pre-defined sort function for UnitOwnDebuff (sort by startTime, then spellId for stability)
 local _ownDebuffSortFunc = function(a, b)
   if a.data.startTime == b.data.startTime then
-    return a.spellName < b.spellName
+    -- Use spellId as tiebreaker instead of name (more stable)
+    local aId = a.data.spellId or 0
+    local bId = b.data.spellId or 0
+    return aId < bId
   end
   return a.data.startTime < b.data.startTime
 end
@@ -909,8 +918,7 @@ function libdebuff:UnitOwnDebuff(unit, id)
         end
       end
       
-      -- Sort by startTime (oldest first = lowest display slot)
-      -- If startTime is equal (e.g. after Carnage refresh), use spellName for stable sorting
+      -- Sort by startTime (oldest first), then by spellId for stable ordering
       table.sort(sortedDebuffs, _ownDebuffSortFunc)
       
       -- Return debuff at position 'id'
@@ -1258,8 +1266,10 @@ if hasNampower then
           if aoeRankStr and aoeRankStr ~= "" then
             aoeRank = tonumber((string.gsub(aoeRankStr, "Rank ", ""))) or 0
           end
-          pendingAoE[aoeName] = {
-            casterGuid = casterGuid,
+          
+          -- Support multiple casters: pendingAoE[spellName] = {[casterGuid] = {rank, time}}
+          pendingAoE[aoeName] = pendingAoE[aoeName] or {}
+          pendingAoE[aoeName][casterGuid] = {
             rank = aoeRank,
             time = GetTime()
           }
@@ -1681,17 +1691,28 @@ if hasNampower then
       
       -- AoE spells (Hurricane, Consecration): no targetGuid in SPELL_GO
       if not casterGuid and pendingAoE[spellName] then
-        local pending = pendingAoE[spellName]
-        if GetTime() - pending.time < 0.05 then  -- 50ms window - events fire instantly
-          casterGuid = pending.casterGuid
+        -- Search through all pending casters for this AoE spell (supports multiple simultaneous casts)
+        local bestMatch = nil
+        local bestAge = 999
+        
+        for pendingCasterGuid, pending in pairs(pendingAoE[spellName]) do
+          local age = GetTime() - pending.time
+          if age < 0.05 and age < bestAge then  -- 50ms window - find most recent
+            bestMatch = pendingCasterGuid
+            bestAge = age
+          end
+        end
+        
+        if bestMatch then
+          casterGuid = bestMatch
           
           if debugStats.enabled and IsCurrentTarget(guid) then
             DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00cc[AOE CASTER FOUND]|r %s from pendingAoE caster=%s age=%.2fs", 
-              GetDebugTimestamp(), spellName, DebugGuid(casterGuid), GetTime() - pending.time))
+              GetDebugTimestamp(), spellName, DebugGuid(casterGuid), bestAge))
           end
         elseif debugStats.enabled and IsCurrentTarget(guid) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[AOE EXPIRED]|r %s pendingAoE too old age=%.2fs", 
-            GetDebugTimestamp(), spellName, GetTime() - pending.time))
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[AOE EXPIRED]|r %s pendingAoE too old", 
+            GetDebugTimestamp(), spellName))
         end
       elseif not casterGuid and debugStats.enabled and IsCurrentTarget(guid) and libspelldata and libspelldata:HasForcedDuration(spellName) then
         DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff0000[AOE MISSING]|r %s no pendingAoE entry found!", 
@@ -1950,14 +1971,17 @@ if hasNampower then
           -- This prevents timer loss during the DEBUFF_REMOVED → DEBUFF_ADDED gap
           local isPendingRecast = false
           if libspelldata and libspelldata:HasForcedDuration(spellName) and pendingAoE[spellName] then
-            local pending = pendingAoE[spellName]
-            -- Check if pending is from same caster and recent (within last 10s)
-            if pending.casterGuid == removedCasterGuid and (GetTime() - pending.time) < 10 then
-              isPendingRecast = true
-              
-              if debugStats.enabled and IsCurrentTarget(guid) then
-                DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[AOE RECAST]|r %s timer preserved (pending recast detected)", 
-                  GetDebugTimestamp(), spellName))
+            -- Check if this specific caster has a pending recast
+            if pendingAoE[spellName][removedCasterGuid] then
+              local pending = pendingAoE[spellName][removedCasterGuid]
+              -- Check if pending is recent (within last 10s)
+              if (GetTime() - pending.time) < 10 then
+                isPendingRecast = true
+                
+                if debugStats.enabled and IsCurrentTarget(guid) then
+                  DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[AOE RECAST]|r %s timer preserved (pending recast detected)", 
+                    GetDebugTimestamp(), spellName))
+                end
               end
             end
           end

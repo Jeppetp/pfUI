@@ -60,8 +60,11 @@ local forcedDurations = {
   ["Rain of Fire"]              = { duration = 8,  refreshOnMelee = false },
   ["Flamestrike"]               = { duration = 8,  refreshOnMelee = false },
 
-  -- ADD MORE SPELLS HERE as needed
+  -- Target spells that return no duration from AURA_CAST and need hardcoded durations.
   -- ["Spell Name"] = { duration = X, refreshOnMelee = true/false },
+  ["Pain Spike"]               = { duration = 5,  refreshOnMelee = false },
+
+
 }
 
 -- ============================================================================

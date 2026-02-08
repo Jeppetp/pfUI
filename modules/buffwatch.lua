@@ -301,9 +301,10 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
         and data[4] and data[4] ~= "" -- buff has a texture
       then
         -- For player: no slot in uuid (slots shift when other buffs expire)
-        -- For target: include slot (multiple players can have same debuff, slot identifies who)
+        -- For target with selfdebuff: use texture+name only (slots can shift when higher priority debuffs overwrite)
+        -- For target without selfdebuff: include slot (multiple players can have same debuff, slot identifies who)
         local uuid
-        if frame.unit == "player" then
+        if frame.unit == "player" or selfdebuff then
           uuid = data[4] .. data[3] -- texture + name only
         else
           uuid = data[4] .. data[3] .. data[2] -- texture + name + slot
