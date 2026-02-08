@@ -87,13 +87,33 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
         name = scanner:Line(1)
       end
 
-      return remaining, texture, name, stacks
+      return remaining, texture, name, stacks, remaining  -- duration = remaining for player
     elseif libdebuff and selfdebuff then
       local name, rank, texture, stacks, dtype, duration, timeleft = libdebuff:UnitOwnDebuff(unit, id)
-      return timeleft, texture, name, stacks
+      
+      -- CRITICAL: Verify debuff actually exists in game
+      -- UnitOwnDebuff has 1s grace period and may return removed debuffs (e.g. cancelled Mind Flay)
+      if name and texture then
+        -- Cross-check with UnitDebuff: loop through all slots to find this debuff with us as caster
+        local foundInGame = false
+        for slot = 1, 16 do
+          local slotName, _, _, _, _, _, _, slotCaster = libdebuff:UnitDebuff(unit, slot)
+          if slotName == name and slotCaster == "player" then
+            foundInGame = true
+            break
+          end
+        end
+        
+        if not foundInGame then
+          -- Debuff is in grace period but not actually in game - return nil
+          return nil, nil, nil, nil, nil
+        end
+      end
+      
+      return timeleft, texture, name, stacks, duration
     elseif libdebuff then
       local name, rank, texture, stacks, dtype, duration, timeleft = libdebuff:UnitDebuff(unit, id)
-      return timeleft, texture, name, stacks
+      return timeleft, texture, name, stacks, duration
     end
   end
 
@@ -250,8 +270,9 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
     local selfdebuff = frame.config.selfdebuff == "1"
 
     for i=1,32 do
-      local timeleft, texture, name, stacks = GetBuffData(frame.unit, i, frame.type, selfdebuff)
+      local timeleft, texture, name, stacks, duration = GetBuffData(frame.unit, i, frame.type, selfdebuff)
       timeleft = timeleft or 0
+      duration = duration or 0
 
       if texture and name and name ~= "" and BuffIsVisible(frame.config, name) then
         frame.buffs[i][1] = timeleft
@@ -259,12 +280,14 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
         frame.buffs[i][3] = name
         frame.buffs[i][4] = texture
         frame.buffs[i][5] = stacks
+        frame.buffs[i][6] = duration  -- Store duration
       else
         frame.buffs[i][1] = 0
         frame.buffs[i][2] = nil
         frame.buffs[i][3] = nil
         frame.buffs[i][4] = nil
         frame.buffs[i][5] = 0
+        frame.buffs[i][6] = 0
       end
     end
 
@@ -291,13 +314,21 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
         frame.bars[bar].id = data[2]
         frame.bars[bar].unit = frame.unit
         frame.bars[bar].type = frame.type
-        frame.bars[bar].endtime = GetTime() + ( data[1] > 0 and data[1] or -1 )
+        
+        -- Calculate correct endtime using duration and timeleft (like normal debuffs)
+        local duration = data[6] or data[1]  -- Use stored duration, fallback to timeleft
+        if duration and duration > 0 and data[1] and data[1] > 0 then
+          local starttime = GetTime() + data[1] - duration
+          frame.bars[bar].endtime = starttime + duration
+        else
+          frame.bars[bar].endtime = GetTime() + ( data[1] > 0 and data[1] or -1 )
+        end
 
         -- update max duration the cached remaining values is less than
         -- the real one, indicates a buff renewal
         frame.durations[uuid] = frame.durations[uuid] or {}
         if not frame.durations[uuid][1] or frame.durations[uuid][1] < data[1] then
-          frame.durations[uuid][2] = data[1] -- max
+          frame.durations[uuid][2] = duration or data[1] -- Use duration for max
         end
         frame.durations[uuid][1] = data[1] -- current
 
