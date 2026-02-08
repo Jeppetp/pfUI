@@ -1116,9 +1116,10 @@ if hasNampower then
       for _, spellName in ipairs(affectedSpells) do
         -- Refresh in ownDebuffs
         if ownDebuffs[targetGuid] and ownDebuffs[targetGuid][spellName] then
+          local duration = ownDebuffs[targetGuid][spellName].duration or 0
           ownDebuffs[targetGuid][spellName].startTime = refreshTime
           if debugStats.enabled then
-            DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[CARNAGE]|r " .. spellName .. " refreshed (CP detected)")
+            DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[CARNAGE]|r " .. spellName .. " refreshed (Carnage triggered - " .. duration .. "s)")
           end
         end
         
