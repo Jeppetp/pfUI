@@ -209,10 +209,12 @@ carnageFrame:SetScript("OnUpdate", function()
   end
   if GetTime() < carnageState.checkTime then return end
 
-  -- Check if we gained a combo point (indicates Carnage proc)
-  local cp = GetComboPoints() or 0
+  -- Check if we GAINED combo points (indicates Carnage proc)
+  -- Compare current CPs to what we had before the Bite
+  local cpNow = GetComboPoints() or 0
+  local cpGained = (cpNow - carnageState.cpBefore) > 0
 
-  if cp > 0 and carnageCallback then
+  if cpGained and carnageCallback then
     -- Carnage triggered! Collect affected spell names
     local affected = {}
     local n = 0
@@ -333,7 +335,8 @@ end
 function lib:ScheduleCarnageCheck(targetGuid)
   carnageState = {
     targetGuid = targetGuid,
-    checkTime = GetTime() + 0.05
+    checkTime = GetTime() + 0.05,
+    cpBefore = GetComboPoints() or 0  -- Track CPs before Bite to detect gain
   }
   carnageFrame:Show()
 end
