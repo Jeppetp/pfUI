@@ -1246,73 +1246,72 @@ if hasNampower then
         end
       end
       
-      if numMissed > 0 or numHit == 0 then
-        -- AoE spells (Hurricane, Consecration) have Hit:0 in SPELL_GO
-        -- but still apply debuffs via DEBUFF_ADDED. Store as pendingAoE.
-        if numHit == 0 and numMissed == 0 and SpellInfo and libspelldata then
-          local aoeName = SpellInfo(spellId)
-          if aoeName and libspelldata:HasForcedDuration(aoeName) then
-            local aoeRank = 0
-            local _, aoeRankStr = SpellInfo(spellId)
-            if aoeRankStr and aoeRankStr ~= "" then
-              aoeRank = tonumber((string.gsub(aoeRankStr, "Rank ", ""))) or 0
-            end
-            pendingAoE[aoeName] = {
-              casterGuid = casterGuid,
-              rank = aoeRank,
-              time = GetTime()
-            }
-            
-            if debugStats.enabled then
-              DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00cc[PENDING AOE]|r %s stored caster=%s", 
-                GetDebugTimestamp(), aoeName, DebugGuid(casterGuid)))
-            end
-            
-            -- CRITICAL: If this AoE spell is already active, refresh it immediately!
-            -- This handles recast scenarios (e.g. casting Consecration while one is already running)
-            -- Find all targets with this debuff from this caster and refresh their timers
-            local refreshedTargets = 0
-            for guid, spellTable in pairs(allAuraCasts) do
-              if spellTable[aoeName] and spellTable[aoeName][casterGuid] then
-                local data = spellTable[aoeName][casterGuid]
-                local timeleft = (data.startTime + data.duration) - GetTime()
-                
-                -- Only refresh if still active (or recently expired)
-                if timeleft > -1 then
-                  local forcedDur = libspelldata:GetDuration(aoeName)
-                  if forcedDur and forcedDur > 0 then
-                    local now = GetTime()
-                    data.startTime = now
-                    data.duration = forcedDur
-                    refreshedTargets = refreshedTargets + 1
-                    
-                    -- Also refresh ownDebuffs if it's ours
-                    local myGuid = GetPlayerGUID()
-                    if casterGuid == myGuid and ownDebuffs[guid] and ownDebuffs[guid][aoeName] then
-                      ownDebuffs[guid][aoeName].startTime = now
-                      ownDebuffs[guid][aoeName].duration = forcedDur
-                    end
-                    
-                    if debugStats.enabled and IsCurrentTarget(guid) then
-                      DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[AOE REFRESH]|r %s on %s refreshed by SPELL_GO", 
-                        GetDebugTimestamp(), aoeName, DebugGuid(guid)))
-                    end
-                    
-                    -- Trigger nameplate update with forceRefresh
-                    if pfUI.nameplates and pfUI.nameplates.OnAuraUpdate then
-                      pfUI.nameplates:OnAuraUpdate(guid, true)
-                    end
+      -- AoE spells with forced durations: store pendingAoE regardless of hit count.
+      -- Ground AoEs (Flamestrike) may report numHit>0, channeled AoEs (Hurricane,
+      -- Consecration) report Hit:0 Miss:0. Both need pendingAoE for DEBUFF_ADDED
+      -- correlation since casterGuid is absent in that event.
+      if numMissed == 0 and SpellInfo and libspelldata then
+        local aoeName = SpellInfo(spellId)
+        if aoeName and libspelldata:HasForcedDuration(aoeName) then
+          local aoeRank = 0
+          local _, aoeRankStr = SpellInfo(spellId)
+          if aoeRankStr and aoeRankStr ~= "" then
+            aoeRank = tonumber((string.gsub(aoeRankStr, "Rank ", ""))) or 0
+          end
+          pendingAoE[aoeName] = {
+            casterGuid = casterGuid,
+            rank = aoeRank,
+            time = GetTime()
+          }
+          
+          if debugStats.enabled then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff00cc[PENDING AOE]|r %s stored caster=%s (hit=%d)", 
+              GetDebugTimestamp(), aoeName, DebugGuid(casterGuid), numHit))
+          end
+          
+          -- If this AoE spell is already active, refresh it immediately!
+          -- Handles recast scenarios (e.g. casting Consecration while one is already running)
+          local refreshedTargets = 0
+          for guid, spellTable in pairs(allAuraCasts) do
+            if spellTable[aoeName] and spellTable[aoeName][casterGuid] then
+              local data = spellTable[aoeName][casterGuid]
+              local timeleft = (data.startTime + data.duration) - GetTime()
+              
+              if timeleft > -1 then
+                local forcedDur = libspelldata:GetDuration(aoeName)
+                if forcedDur and forcedDur > 0 then
+                  local now = GetTime()
+                  data.startTime = now
+                  data.duration = forcedDur
+                  refreshedTargets = refreshedTargets + 1
+                  
+                  local myGuid = GetPlayerGUID()
+                  if casterGuid == myGuid and ownDebuffs[guid] and ownDebuffs[guid][aoeName] then
+                    ownDebuffs[guid][aoeName].startTime = now
+                    ownDebuffs[guid][aoeName].duration = forcedDur
+                  end
+                  
+                  if debugStats.enabled and IsCurrentTarget(guid) then
+                    DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[AOE REFRESH]|r %s on %s refreshed by SPELL_GO", 
+                      GetDebugTimestamp(), aoeName, DebugGuid(guid)))
+                  end
+                  
+                  if pfUI.nameplates and pfUI.nameplates.OnAuraUpdate then
+                    pfUI.nameplates:OnAuraUpdate(guid, true)
                   end
                 end
               end
             end
-            
-            if debugStats.enabled and refreshedTargets > 0 then
-              DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[AOE REFRESH]|r %s refreshed %d target(s)", 
-                GetDebugTimestamp(), aoeName, refreshedTargets))
-            end
+          end
+          
+          if debugStats.enabled and refreshedTargets > 0 then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ff00[AOE REFRESH]|r %s refreshed %d target(s)", 
+              GetDebugTimestamp(), aoeName, refreshedTargets))
           end
         end
+      end
+      
+      if numMissed > 0 or numHit == 0 then
         -- Clear captured CPs on miss/dodge/parry
         local myGuid = GetPlayerGUID()
         if casterGuid == myGuid then
@@ -1994,6 +1993,20 @@ if hasNampower then
         -- Without this, nameplates show stale timer data after untarget/retarget cycles
         if pfUI.nameplates and pfUI.nameplates.OnAuraUpdate then
           pfUI.nameplates:OnAuraUpdate(targetGuid, true)
+          
+          if debugStats.enabled then
+            DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[TARGET_CHANGE]|r OnAuraUpdate called for %s", DebugGuid(targetGuid)))
+            
+            -- Show what's in ownDebuffs for this target
+            if ownDebuffs[targetGuid] then
+              for spell, data in pairs(ownDebuffs[targetGuid]) do
+                local timeleft = (data.startTime + data.duration) - GetTime()
+                DEFAULT_CHAT_FRAME:AddMessage(string.format("  └ ownDebuffs['%s'] timeleft=%.1fs", spell, timeleft))
+              end
+            else
+              DEFAULT_CHAT_FRAME:AddMessage("  └ ownDebuffs[guid] is nil")
+            end
+          end
         end
       end
     end

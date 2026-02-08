@@ -315,7 +315,12 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
           local r, g, b
           if frame.type == "HARMFUL" then
             r, g, b = 1, .2, .2
-            local _, _, dtype = UnitDebuff(frame.unit, data[2])
+            local _, _, dtype
+            if libdebuff then
+              _, _, _, _, dtype = libdebuff:UnitDebuff(frame.unit, data[2])
+            else
+              _, _, dtype = UnitDebuff(frame.unit, data[2])
+            end
             if dtype and DebuffTypeColor[dtype] then
               r,g,b = DebuffTypeColor[dtype].r,DebuffTypeColor[dtype].g,DebuffTypeColor[dtype].b
             end

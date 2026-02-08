@@ -58,6 +58,7 @@ local forcedDurations = {
   ["Blizzard"]                  = { duration = 8,  refreshOnMelee = false },
   ["Hellfire"]                  = { duration = 15, refreshOnMelee = false },
   ["Rain of Fire"]              = { duration = 8,  refreshOnMelee = false },
+  ["Flamestrike"]               = { duration = 8,  refreshOnMelee = false },
 
   -- ADD MORE SPELLS HERE as needed
   -- ["Spell Name"] = { duration = X, refreshOnMelee = true/false },
