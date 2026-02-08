@@ -2110,6 +2110,10 @@ function pfUI.uf:RefreshUnit(unit, component)
         end
       else
         unit.buffs[i]:Hide()
+        -- Clear timer when buff is removed
+        if unit.buffs[i].cd then
+          CooldownFrame_SetTimer(unit.buffs[i].cd, 0, 0, 0)
+        end
       end
     end
   end
@@ -2175,6 +2179,8 @@ function pfUI.uf:RefreshUnit(unit, component)
         dtype = GetPlayerBuffDispelType(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
       elseif selfdebuff == "1" then
         _, _, texture, stacks, dtype = libdebuff:UnitOwnDebuff(unitstr, i)
+      elseif libdebuff then
+        _, _, texture, stacks, dtype = libdebuff:UnitDebuff(unitstr, i)
       else
         texture, stacks, dtype = UnitDebuff(unitstr, i)
       end
@@ -2212,6 +2218,8 @@ function pfUI.uf:RefreshUnit(unit, component)
         end
       else
         unit.debuffs[i]:Hide()
+        -- Clear timer when debuff is removed
+        CooldownFrame_SetTimer(unit.debuffs[i].cd, 0, 0, 0)
       end
     end
   end
@@ -2299,7 +2307,12 @@ function pfUI.uf:RefreshUnit(unit, component)
         indicator[debuff].visible = nil
 
         for i=1,16 do
-          local _, _, dtype = UnitDebuff(unitstr, i)
+          local _, _, dtype
+          if libdebuff then
+            _, _, _, _, dtype = libdebuff:UnitDebuff(unitstr, i)
+          else
+            _, _, dtype = UnitDebuff(unitstr, i)
+          end
           if dtype == debuff then
             indicator[debuff].visible = true
           end
@@ -2413,26 +2426,29 @@ function pfUI.uf:RefreshUnit(unit, component)
       end
 
       for i=1,32 do -- scan for custom debuffs
-        local texture, count = UnitDebuff(unitstr, i)
-        if texture then
-          local timeleft, name, _
-          if libdebuff then
-            -- Use UnitOwnDebuff if "show only own debuffs" is enabled
-            if unit.config.selfdebuff == "1" then
-              name, _, texture, _, _, _, timeleft = libdebuff:UnitOwnDebuff(unitstr, i)
-            else
-              name, _, texture, _, _, _, timeleft = libdebuff:UnitDebuff(unitstr, i)
-            end
+        local texture, count, timeleft, duration, name, _
+        if libdebuff then
+          if unit.config.selfdebuff == "1" then
+            name, _, texture, count, _, duration, timeleft = libdebuff:UnitOwnDebuff(unitstr, i)
           else
+            name, _, texture, count, _, duration, timeleft = libdebuff:UnitDebuff(unitstr, i)
+          end
+        else
+          texture, count = UnitDebuff(unitstr, i)
+          if texture then
             scanner:SetUnitDebuff(unitstr, i)
             name = scanner:Line(1) or ""
           end
+        end
+        if texture then
 
           -- match filter
           if name then
             for _, filter in pairs(unit.indicator_custom) do
               if filter == string.lower(name) then
-                pfUI.uf:AddIcon(unit, pos, texture, timeleft, count)
+                -- Calculate start time for accurate timer display (like normal debuffs)
+                local start = duration and timeleft and (GetTime() + timeleft - duration) or nil
+                pfUI.uf:AddIcon(unit, pos, texture, timeleft, count, start, duration)
                 pos = pos + 1
                 break
               end
@@ -2805,11 +2821,16 @@ function pfUI.uf:AddIcon(frame, pos, icon, timeleft, stacks, start, duration)
   if frame.icon[pos].icon ~= icon then
     frame.icon[pos].tex:SetTexture(icon)
     frame.icon[pos].icon = icon
+    -- Clear old timer when icon changes to prevent visual artifacts
+    CooldownFrame_SetTimer(frame.icon[pos].cd, 0, 0, 0)
   end
 
   -- show remaining time if config is set
   if showtime and start and duration and timeleft < 100 and iconsize > 9 then
     CooldownFrame_SetTimer(frame.icon[pos].cd, start, duration, 1)
+  elseif showtime and duration and timeleft and timeleft < 100 and iconsize > 9 then
+    -- Use calculated start time for accurate display (like normal debuffs)
+    CooldownFrame_SetTimer(frame.icon[pos].cd, GetTime() + timeleft - duration, duration, 1)
   elseif showtime and timeleft and timeleft < 100 and iconsize > 9 then
     CooldownFrame_SetTimer(frame.icon[pos].cd, GetTime(), timeleft, 1)
   else
