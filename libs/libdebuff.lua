@@ -1979,13 +1979,22 @@ if hasNampower then
       end
       
     elseif event == "PLAYER_TARGET_CHANGED" then
-      -- Nothing special needed - GetUnitField will get fresh data on next query
       if not UnitExists then return end
       local _, targetGuid = UnitExists("target")
       
       if targetGuid and targetGuid ~= "" then
+        -- Invalidate slot map cache on retarget
+        -- Prevents stale slot mappings after untarget/retarget cycles
+        slotMapCache[targetGuid] = nil
+        
         -- Cleanup expired timers for new target
         CleanupExpiredTimers(targetGuid)
+        
+        -- Force nameplate refresh on retarget
+        -- Without this, nameplates show stale timer data after untarget/retarget cycles
+        if pfUI.nameplates and pfUI.nameplates.OnAuraUpdate then
+          pfUI.nameplates:OnAuraUpdate(targetGuid, true)
+        end
       end
     end
     
