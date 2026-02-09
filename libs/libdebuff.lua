@@ -202,7 +202,7 @@ local AURA_CAST_DEDUPE_WINDOW = 0.1  -- Ignore duplicates within 100ms
 -- [targetGuid][spellName] = timestamp (only tracks player's spells)
 pfUI.libdebuff_recent_hits = pfUI.libdebuff_recent_hits or {}
 local recentHits = pfUI.libdebuff_recent_hits
-local HIT_TRACKING_WINDOW = 0.15  -- Track hits within 150ms
+local HIT_TRACKING_WINDOW = 0.1  -- Track hits within 100ms (AURA_CAST validation)
 
 -- ============================================================================
 -- STATIC POPUP DIALOGS
@@ -464,24 +464,42 @@ local function GetBuffSlotMap(guid)
   for auraSlot = 1, 32 do
     local spellId = auras[auraSlot]
     if spellId and spellId > 0 then
-      displaySlot = displaySlot + 1
-      local spellName = SpellInfo(spellId)
+      -- Get texture via GetSpellIcon (uses DBC when possible, works out of range!)
       local texture = libdebuff:GetSpellIcon(spellId)
       
-      -- Get stacks from auraApplications (0-indexed, so +1 for display)
-      local stacks = (auraApps and auraApps[auraSlot] or 0) + 1
+      -- Get spell name: Try DBC first (works out of range!), fallback to SpellInfo
+      local spellName = nil
+      if GetSpellRecField then
+        spellName = GetSpellRecField(spellId, "name")
+        -- Empty string = not found, treat as nil
+        if spellName == "" then
+          spellName = nil
+        end
+      end
+      if not spellName and SpellInfo then
+        spellName = SpellInfo(spellId)
+      end
       
-      map[displaySlot] = {
-        auraSlot = auraSlot,
-        spellId = spellId,
-        spellName = spellName or "Unknown",
-        stacks = stacks,
-        texture = texture
-      }
+      -- Skip "?" icons (unknown spells)
+      -- Only add if we have a real texture (not the question mark fallback)
+      if texture then
+        displaySlot = displaySlot + 1
+        
+        -- Get stacks from auraApplications (0-indexed, so +1 for display)
+        local stacks = (auraApps and auraApps[auraSlot] or 0) + 1
+        
+        map[displaySlot] = {
+          auraSlot = auraSlot,
+          spellId = spellId,
+          spellName = spellName or "Unknown",
+          stacks = stacks,
+          texture = texture
+        }
+      end
     end
   end
   
-  -- Cache the result (share cache with debuffs)
+  -- Cache the result (always cache, even if some buffs were skipped)
   if not slotMapCache[guid] then
     slotMapCache[guid] = { timestamp = now }
   end
@@ -501,7 +519,7 @@ local function GetDebuffSlotMap(guid)
   -- Check cache first
   local now = GetTime()
   local cached = slotMapCache[guid]
-  if cached and (now - cached.timestamp) < SLOT_MAP_CACHE_DURATION then
+  if cached and cached.map and (now - cached.timestamp) < SLOT_MAP_CACHE_DURATION then
     return cached.map
   end
   
@@ -522,14 +540,23 @@ local function GetDebuffSlotMap(guid)
   for auraSlot = 33, 48 do
     local spellId = auras[auraSlot]
     if spellId and spellId > 0 then
-      displaySlot = displaySlot + 1
-      local spellName = SpellInfo(spellId)
+      -- Get texture via GetSpellIcon (uses DBC when possible, works out of range!)
       local texture = libdebuff:GetSpellIcon(spellId)
       
-      -- Get stacks from auraApplications (0-indexed, so +1 for display)
-      local stacks = (auraApps and auraApps[auraSlot] or 0) + 1
+      -- Get spell name: Try DBC first (works out of range!), fallback to SpellInfo
+      local spellName = nil
+      if GetSpellRecField then
+        spellName = GetSpellRecField(spellId, "name")
+        -- Empty string = not found, treat as nil
+        if spellName == "" then
+          spellName = nil
+        end
+      end
+      if not spellName and SpellInfo then
+        spellName = SpellInfo(spellId)
+      end
       
-      -- Get debuff type from SpellRec DBC
+      -- Get debuff type from SpellRec DBC (always works)
       local dtype = nil
       if GetSpellRecField then
         local dispelId = GetSpellRecField(spellId, "dispel")
@@ -538,18 +565,27 @@ local function GetDebuffSlotMap(guid)
         end
       end
       
-      map[displaySlot] = {
-        auraSlot = auraSlot,
-        spellId = spellId,
-        spellName = spellName or "Unknown",
-        stacks = stacks,
-        texture = texture,
-        dtype = dtype
-      }
+      -- Skip "?" icons (unknown spells)
+      -- Only add if we have a real texture (not the question mark fallback)
+      if texture then
+        displaySlot = displaySlot + 1
+        
+        -- Get stacks from auraApplications (0-indexed, so +1 for display)
+        local stacks = (auraApps and auraApps[auraSlot] or 0) + 1
+        
+        map[displaySlot] = {
+          auraSlot = auraSlot,
+          spellId = spellId,
+          spellName = spellName or "Unknown",
+          stacks = stacks,
+          texture = texture,
+          dtype = dtype
+        }
+      end
     end
   end
   
-  -- Cache the result
+  -- Cache the result (always cache, even if some debuffs were skipped)
   slotMapCache[guid] = {
     map = map,
     timestamp = now
@@ -919,18 +955,27 @@ function libdebuff:UnitDebuff(unit, displaySlot)
       return effect, rank, bTexture, bStacks, bDtype, duration, timeleft, caster
     end
     
-    -- Get current slot map from GetUnitField (cached 50ms)
+    -- HYBRID: Check if unit is in range
+    local inRange = UnitIsVisible and UnitIsVisible(unit)
+    
+    if not inRange then
+      -- OUT OF RANGE: Use vanilla Blizzard API (slow but works!)
+      local bTexture, bStacks, bDtype = UnitDebuff(unit, displaySlot)
+      if bTexture then
+        scanner:SetUnitDebuff(unit, displaySlot)
+        effect = scanner:Line(1) or ""
+        return effect, rank, bTexture, bStacks, bDtype, duration, timeleft, caster
+      end
+      return nil
+    end
+    
+    -- IN RANGE: Get current slot map from GetUnitField (cached 50ms)
     local slotMap = GetDebuffSlotMap(guid)
     if not slotMap or not slotMap[displaySlot] then
       return nil
     end
     
     local slotData = slotMap[displaySlot]
-    effect = slotData.spellName
-    texture = slotData.texture
-    stacks = slotData.stacks
-    dtype = slotData.dtype
-    local auraSlot = slotData.auraSlot
     
     -- Get caster info for this slot
     local slotCasterGuid, isOurs = GetSlotCaster(guid, auraSlot, effect)
@@ -1057,34 +1102,33 @@ function libdebuff:UnitBuff(unit, displaySlot)
       return effect, rank, texture, stacks, duration, timeleft, caster
     end
     
-    -- For ALL other units: Build compressed list from GetUnitField
-    local auras = GetUnitField(guid, "aura")
-    local auraApps = GetUnitField(guid, "auraApplications")
+    -- HYBRID: Check if unit is in range
+    local inRange = UnitIsVisible and UnitIsVisible(unit)
     
-    if not auras then
+    if not inRange then
+      -- OUT OF RANGE: Use vanilla Blizzard API (slow but works!)
+      local bTexture, bStacks = UnitBuff(unit, displaySlot)
+      if bTexture then
+        scanner:SetUnitBuff(unit, displaySlot)
+        effect = scanner:Line(1) or ""
+        return effect, rank, bTexture, bStacks, duration, timeleft, caster
+      end
       return nil
     end
     
-    -- Build compressed list (skip empty slots)
-    local displayIndex = 0
-    for auraSlot = 1, 32 do
-      local spellId = auras[auraSlot]
-      if spellId and spellId > 0 then
-        displayIndex = displayIndex + 1
-        
-        -- Is this the slot we're looking for?
-        if displayIndex == displaySlot then
-          effect = SpellInfo(spellId)
-          texture = libdebuff:GetSpellIcon(spellId)
-          stacks = (auraApps and auraApps[auraSlot] or 0) + 1
-          
-          return effect, rank, texture, stacks, duration, timeleft, caster, spellId
-        end
-      end
+    -- IN RANGE: Use GetBuffSlotMap (fast Nampower method with cache!)
+    local slotMap = GetBuffSlotMap(guid)
+    if not slotMap or not slotMap[displaySlot] then
+      return nil
     end
     
-    -- displaySlot not found (> number of buffs)
-    return nil
+    local slotData = slotMap[displaySlot]
+    effect = slotData.spellName
+    texture = slotData.texture
+    stacks = slotData.stacks
+    local spellId = slotData.spellId
+    
+    return effect, rank, texture, stacks, duration, timeleft, caster, spellId
   end
   
   -- ============================================================================
@@ -1242,6 +1286,18 @@ function libdebuff:GetEnhancedDebuffs(targetGUID)
   end
   
   return result
+end
+
+-- ============================================================================
+-- Cache Management
+-- ============================================================================
+
+-- Invalidate slot map cache for a specific GUID
+-- Called when unit goes in/out of range to force fresh data fetch
+function libdebuff:InvalidateCache(guid)
+  if guid and slotMapCache[guid] then
+    slotMapCache[guid] = nil
+  end
 end
 
 -- ============================================================================

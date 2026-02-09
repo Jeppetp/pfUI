@@ -1572,6 +1572,28 @@ function pfUI.uf.OnUpdate()
           pfUI.uf:RefreshIndicators(this)
         end
       else
+        -- Track range state to detect changes
+        local unitstr = this.label .. this.id
+        local isInRange = UnitIsVisible and UnitIsVisible(unitstr)
+        
+        -- Detect range change (SCHALTER!)
+        if this.wasInRange ~= isInRange then
+          this.wasInRange = isInRange
+          
+          -- Invalidate libdebuff cache for this unit on range change
+          if libdebuff and UnitExists then
+            local _, guid = UnitExists(unitstr)
+            if guid and libdebuff.InvalidateCache then
+              libdebuff:InvalidateCache(guid)
+            end
+          end
+          
+          -- SCHALTER: Refresh bei JEDEM Range-Wechsel (beide Richtungen!)
+          -- IN range: Nampower data
+          -- OUT range: Blizzard API (einmalig!)
+          pfUI.uf:RefreshUnit(this, "aura")
+        end
+        
         pfUI.uf:RefreshUnitState(this)
         pfUI.uf:RefreshIndicators(this)
       end
