@@ -399,6 +399,13 @@ pfUI:RegisterModule("superwow", "vanilla", function ()
         targetMana:Hide()
         return
       end
+      
+      -- Only show for Druids (only class that shapeshifts and needs secondary mana bar)
+      local _, targetClass = UnitClass("target")
+      if targetClass ~= "DRUID" then
+        targetMana:Hide()
+        return
+      end
 
       -- Get base mana using Nampower's GetUnitField
       local baseMana, baseMaxMana
