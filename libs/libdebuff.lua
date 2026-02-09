@@ -202,7 +202,7 @@ local AURA_CAST_DEDUPE_WINDOW = 0.1  -- Ignore duplicates within 100ms
 -- [targetGuid][spellName] = timestamp (only tracks player's spells)
 pfUI.libdebuff_recent_hits = pfUI.libdebuff_recent_hits or {}
 local recentHits = pfUI.libdebuff_recent_hits
-local HIT_TRACKING_WINDOW = 0.5  -- Track hits within 500ms
+local HIT_TRACKING_WINDOW = 0.15  -- Track hits within 150ms
 
 -- ============================================================================
 -- STATIC POPUP DIALOGS
