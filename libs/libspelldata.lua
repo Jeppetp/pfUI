@@ -45,24 +45,38 @@ local forcedDurations = {
   -- PALADIN JUDGEMENTS (10 sec, refreshed by every melee autohit from the caster)
   -- AURA_CAST never fires for these on the target. Timer starts from
   -- Judgement(20271) SPELL_GO, refreshed by caster's melee hits.
-  ["Judgement of Wisdom"]       = { duration = 10, refreshOnMelee = true },
-  ["Judgement of Light"]        = { duration = 10, refreshOnMelee = true },
-  ["Judgement of the Crusader"] = { duration = 10, refreshOnMelee = true },
-  ["Judgement of Justice"]      = { duration = 10, refreshOnMelee = true },
+  ["Judgement of Wisdom"]       = { duration = 10, refreshOnMelee = true,  applicatorSpells = false },
+  ["Judgement of Light"]        = { duration = 10, refreshOnMelee = true,  applicatorSpells = false },
+  ["Judgement of the Crusader"] = { duration = 10, refreshOnMelee = true,  applicatorSpells = false },
+  ["Judgement of Justice"]      = { duration = 10, refreshOnMelee = true,  applicatorSpells = false },
+
+  -- MAGE PASSIVE PROCS (refreshed by specific Fire spells)
+  -- Fire Vulnerability: Applied by Scorch, refreshed by Scorch and Fire Blast
+  ["Fire Vulnerability"]        = { duration = 30, refreshOnMelee = false, applicatorSpells = {"Scorch", "Fire Blast"} },
+  
+  -- Ignite: Applied/refreshed ONLY on crit Fire damage (any Fire spell can crit)
+  ["Ignite"]                    = { duration = 4,  refreshOnMelee = false, critBasedRefresh = true },
+  
+  -- Winter's Chill: Applied/refreshed by Frost spells (NOT Blizzard - vanilla bug)
+  ["Winter's Chill"]            = { duration = 15, refreshOnMelee = false, applicatorSpells = {"Frostbolt", "Cone of Cold", "Frost Nova"} },
+  
+  -- PRIEST PASSIVE PROCS (refreshed by specific Shadow spells)
+  -- Shadow Weaving: Applied/refreshed by Shadow DAMAGE spells (not Mana Burn!)
+  ["Shadow Weaving"]            = { duration = 15, refreshOnMelee = false, applicatorSpells = {"Mind Blast", "Mind Flay", "Shadow Word: Pain", "Devouring Plague"} },
 
   -- CHANNELED/AOE DEBUFFS (fixed duration, applied via DEBUFF_ADDED)
   -- These have no AURA_CAST and no targetGuid in SPELL_GO.
   -- Caster is resolved via pendingAoE in libdebuff.
-  ["Hurricane"]                 = { duration = 10, refreshOnMelee = false },
-  ["Consecration"]              = { duration = 8,  refreshOnMelee = false },
-  ["Blizzard"]                  = { duration = 8,  refreshOnMelee = false },
-  ["Hellfire"]                  = { duration = 15, refreshOnMelee = false },
-  ["Rain of Fire"]              = { duration = 8,  refreshOnMelee = false },
-  ["Flamestrike"]               = { duration = 8,  refreshOnMelee = false },
+  ["Hurricane"]                 = { duration = 10, refreshOnMelee = false, applicatorSpells = false },
+  ["Consecration"]              = { duration = 8,  refreshOnMelee = false, applicatorSpells = false },
+  ["Blizzard"]                  = { duration = 8,  refreshOnMelee = false, applicatorSpells = false },
+  ["Hellfire"]                  = { duration = 15, refreshOnMelee = false, applicatorSpells = false },
+  ["Rain of Fire"]              = { duration = 8,  refreshOnMelee = false, applicatorSpells = false },
+  ["Flamestrike"]               = { duration = 8,  refreshOnMelee = false, applicatorSpells = false },
 
   -- Target spells that return no duration from AURA_CAST and need hardcoded durations.
-  -- ["Spell Name"] = { duration = X, refreshOnMelee = true/false },
-  ["Pain Spike"]               = { duration = 5,  refreshOnMelee = false },
+  -- ["Spell Name"] = { duration = X, refreshOnMelee = true/false, applicatorSpells = {...}/false },
+  ["Pain Spike"]               = { duration = 5,  refreshOnMelee = false, applicatorSpells = false },
 
 
 }
@@ -258,6 +272,43 @@ end
 function lib:HasForcedDuration(spellName)
   if not spellName then return false end
   return forcedDurations[spellName] ~= nil
+end
+
+--- Check if a spell can refresh a debuff via applicatorSpells list
+-- @param debuffName  The debuff to check (e.g., "Fire Vulnerability")
+-- @param spellName   The spell being cast (e.g., "Scorch", "Fire Blast")
+-- @return true if spellName is in debuffName's applicatorSpells list
+function lib:IsApplicatorSpell(debuffName, spellName)
+  if not debuffName or not spellName then return false end
+  
+  local data = forcedDurations[debuffName]
+  if not data then return false end
+  
+  -- No applicator spells defined (false or nil)
+  if not data.applicatorSpells then return false end
+  
+  -- Check if spellName is in the applicatorSpells table
+  for _, applicator in ipairs(data.applicatorSpells) do
+    if applicator == spellName then
+      return true
+    end
+  end
+  
+  return false
+end
+
+--- Check if a debuff requires a critical hit to refresh
+-- @param debuffName  The debuff to check (e.g., "Ignite")
+-- @param spellName   The spell that dealt damage (optional, for future filtering)
+-- @return true if debuff requires crit for refresh
+function lib:RequiresCritForRefresh(debuffName, spellName)
+  if not debuffName then return false end
+  
+  local data = forcedDurations[debuffName]
+  if not data then return false end
+  
+  -- Check if critBasedRefresh is true
+  return data.critBasedRefresh == true
 end
 
 --- Is this a self-overwrite debuff? (only one instance per target)
