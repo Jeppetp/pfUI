@@ -103,7 +103,136 @@ local function BuffOnEnter()
   if parent.label == "player" then
     GameTooltip:SetPlayerBuff(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL"))
   else
-    GameTooltip:SetUnitBuff(parent.label .. parent.id, this.id)
+    -- For non-player units: Build tooltip from GetSpellRec data
+    if libdebuff and libdebuff.UnitBuff and GetSpellRec then
+      local name, rank, texture, stacks, duration, timeleft, caster, spellId = libdebuff:UnitBuff(parent.label .. parent.id, this.id)
+      
+      if spellId then
+        local spellRec = GetSpellRec(spellId)
+        if spellRec then
+          -- Add spell name (white)
+          GameTooltip:AddLine(spellRec.name, 1, 1, 1)
+          
+          -- Add rank if exists (gray)
+          if spellRec.rank and spellRec.rank ~= "" then
+            GameTooltip:AddLine(spellRec.rank, 0.5, 0.5, 0.5)
+          end
+          
+          -- Format tooltip by replacing placeholders with actual values
+          local tooltipText = spellRec.tooltip or spellRec.description or ""
+          if tooltipText ~= "" then
+            -- First pass: Handle cross-spell references (e.g., $12345s1, $12345d1)
+            -- Pattern: $[spellId][s/d][effectIndex]
+            local crossRefs = {}
+            for refSpellId, valueType, index in string.gfind(tooltipText, "%$(%d+)([sd])(%d)") do
+              local refId = tonumber(refSpellId)
+              local idx = tonumber(index)
+              
+              if not crossRefs[refId] then
+                crossRefs[refId] = GetSpellRec(refId)
+              end
+              
+              if crossRefs[refId] then
+                local placeholder = "$" .. refSpellId .. valueType .. index
+                local value = nil
+                
+                if valueType == "s" then
+                  -- effectBasePoints value
+                  if crossRefs[refId].effectBasePoints and crossRefs[refId].effectBasePoints[idx] then
+                    value = crossRefs[refId].effectBasePoints[idx] + 1
+                  end
+                elseif valueType == "d" then
+                  -- Duration - use duration index lookup table
+                  local durationIndex = crossRefs[refId].durationIndex
+                  -- Common duration indices (in seconds)
+                  local durationTable = {
+                    [1] = 10,   -- 10 sec
+                    [3] = 30,   -- 30 sec
+                    [7] = 5,    -- 5 sec
+                    [8] = 15,   -- 15 sec
+                    [9] = 2,    -- 2 sec
+                    [21] = 6,   -- 6 sec
+                    [23] = 20,  -- 20 sec
+                    [28] = 3,   -- 3 sec
+                    [29] = 12,  -- 12 sec
+                    [35] = 8,   -- 8 sec
+                    [39] = 120, -- 2 min
+                  }
+                  value = durationTable[durationIndex]
+                end
+                
+                if value then
+                  -- Escape special pattern characters in placeholder for gsub
+                  local escapedPlaceholder = string.gsub(placeholder, "([%$%.%-%+%[%]%(%)%%])", "%%%1")
+                  tooltipText = string.gsub(tooltipText, escapedPlaceholder, value)
+                end
+              end
+            end
+            
+            -- Second pass: Replace standard placeholders for current spell
+            for i = 1, 3 do
+              if spellRec.effectBasePoints and spellRec.effectBasePoints[i] then
+                local value = spellRec.effectBasePoints[i] + 1
+                
+                -- $s1, $s2, $s3 - direct replacement
+                tooltipText = string.gsub(tooltipText, "%$s" .. i, value)
+                
+                -- $S1, $S2, $S3 - uppercase variant
+                tooltipText = string.gsub(tooltipText, "%$S" .. i, value)
+                
+                -- $/1000;S1 - divide by 1000 (for time values in milliseconds)
+                local pattern = "%$%/1000%;S" .. i
+                if string.find(tooltipText, pattern) then
+                  local divided = value / 1000
+                  tooltipText = string.gsub(tooltipText, pattern, divided)
+                end
+                
+                -- $/(%-?)1000;S1 - handle negative division
+                local pattern2 = "%$%/%-?1000%;S" .. i
+                if string.find(tooltipText, pattern2) then
+                  local divided = math.abs(value) / 1000
+                  tooltipText = string.gsub(tooltipText, pattern2, divided)
+                end
+              end
+            end
+            
+            -- $d - Duration for current spell
+            if spellRec.durationIndex then
+              local durationTable = {
+                [1] = 10, [3] = 30, [7] = 5, [8] = 15, [9] = 2,
+                [21] = 6, [23] = 20, [28] = 3, [29] = 12, [35] = 8, [39] = 120,
+              }
+              local duration = durationTable[spellRec.durationIndex]
+              if duration then
+                tooltipText = string.gsub(tooltipText, "%$d", duration)
+              end
+            end
+            
+            -- Add formatted tooltip (yellow/gold)
+            GameTooltip:AddLine(tooltipText, 1, 0.82, 0, 1)
+          end
+          
+          GameTooltip:Show()
+        else
+          -- Fallback if GetSpellRec fails
+          GameTooltip:AddLine(name, 1, 1, 1)
+          if rank and rank ~= "" then
+            GameTooltip:AddLine(rank, 0.5, 0.5, 0.5)
+          end
+          GameTooltip:Show()
+        end
+      elseif name then
+        -- Fallback: Manual tooltip if no spell ID
+        GameTooltip:AddLine(name, 1, 1, 1)
+        if rank and rank ~= "" then
+          GameTooltip:AddLine(rank, 0.5, 0.5, 0.5)
+        end
+        GameTooltip:Show()
+      end
+    else
+      -- Fallback to vanilla if libdebuff not available
+      GameTooltip:SetUnitBuff(parent.label .. parent.id, this.id)
+    end
   end
 
   if IsShiftKeyDown() then
@@ -410,7 +539,13 @@ function pfUI.uf:DetectBuff(name, id)
 
   -- skip here if disabled
   if pfUI_config.unitframes.buffdetect == "0" then
-    return UnitBuff(name, id)
+    -- Even with buffdetect disabled, use libdebuff for non-player units (vanilla UnitBuff doesn't work for enemies)
+    if libdebuff and libdebuff.UnitBuff then
+      local _, _, texture, stacks = libdebuff:UnitBuff(name, id)
+      return texture, stacks
+    else
+      return UnitBuff(name, id)
+    end
   end
 
   -- clear previously assigned
@@ -434,7 +569,16 @@ function pfUI.uf:DetectBuff(name, id)
   end
 
   -- check the regular way
-  detect_icon = UnitBuff(name, id)
+  if libdebuff and libdebuff.UnitBuff then
+    local _, _, texture_temp, stacks_temp = libdebuff:UnitBuff(name, id)
+    detect_icon = texture_temp
+    if detect_icon then
+      return detect_icon, stacks_temp
+    end
+  else
+    detect_icon = UnitBuff(name, id)
+  end
+  
   if detect_icon then
     if not pfUI_cache.buff_icons[detect_icon] then
       -- read buff name and cache it
@@ -447,7 +591,12 @@ function pfUI.uf:DetectBuff(name, id)
     end
 
     -- return the regular function
-    return UnitBuff(name, id)
+    if libdebuff and libdebuff.UnitBuff then
+      local _, _, texture, stacks = libdebuff:UnitBuff(name, id)
+      return texture, stacks
+    else
+      return UnitBuff(name, id)
+    end
   end
 
   -- try to guess the buff based on tooltips and icon caches
@@ -2364,10 +2513,19 @@ function pfUI.uf:RefreshUnit(unit, component)
     local pos = 1
     if table.getn(unit.indicators) > 0 then
       for i=1,32 do
-        local texture, count = UnitBuff(unitstr, i)
-        local timeleft, _
-        if pfUI.client > 11200 then
+        local texture, count, timeleft
+        
+        -- Use libdebuff for better compatibility (works for all units, not just player)
+        if libdebuff then
+          local name, rank, buffTexture, buffStacks, duration, buffTimeleft = libdebuff:UnitBuff(unitstr, i)
+          texture = buffTexture
+          count = buffStacks
+          timeleft = buffTimeleft
+        elseif pfUI.client > 11200 then
           _, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
+          count = 1
+        else
+          texture, count = UnitBuff(unitstr, i)
         end
 
         if texture then
@@ -2404,15 +2562,23 @@ function pfUI.uf:RefreshUnit(unit, component)
       scanner = scanner or libtipscan:GetScanner("unitframes")
 
       for i=1,32 do -- scan for custom buffs
-        local texture, count = UnitBuff(unitstr, i)
-        if texture then
-          local timeleft, name, _
-          if pfUI.client > 11200 then
-            name, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
-          else
+        local texture, count, timeleft, name
+        
+        -- Use libdebuff for better compatibility
+        if libdebuff then
+          name, _, texture, count, _, timeleft = libdebuff:UnitBuff(unitstr, i)
+        elseif pfUI.client > 11200 then
+          name, _, texture, _, _, timeleft = _G.UnitBuff(unitstr, i)
+          count = count or 1
+        else
+          texture, count = UnitBuff(unitstr, i)
+          if texture then
             scanner:SetUnitBuff(unitstr, i)
             name = scanner:Line(1) or ""
           end
+        end
+        
+        if texture then
 
           -- match filter
           for _, filter in pairs(unit.indicator_custom) do
@@ -3364,3 +3530,13 @@ _G.SlashCmdList["PFUISTATS"] = function(msg)
     end
   end
 end
+
+-- Delayed load message
+local loadFrame = CreateFrame("Frame")
+loadFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+loadFrame:SetScript("OnEvent", function()
+  this:UnregisterEvent("PLAYER_ENTERING_WORLD")
+  if libdebuff and libdebuff.UnitBuff then
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[unitframes]|r Using libdebuff for Target Buffs (GetUnitField support)")
+  end
+end)

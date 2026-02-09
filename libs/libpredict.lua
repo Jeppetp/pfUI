@@ -649,7 +649,15 @@ local pendingHots = {}
 -- Hilfsfunktion: Prüfe ob Buff auf Unit vorhanden ist
 local function UnitHasBuff(unit, buffName)
   for i = 1, 32 do
-    local name = UnitBuff(unit, i)
+    local name
+    if unit == "player" then
+      name = UnitBuff(unit, i)
+    elseif libdebuff and libdebuff.UnitBuff then
+      name = libdebuff:UnitBuff(unit, i)
+    else
+      name = UnitBuff(unit, i)
+    end
+    
     if not name then break end
     if name == buffName then return true end
   end

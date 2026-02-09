@@ -356,6 +356,65 @@ local dispelTypeMap = {
   [4] = "Poison",
 }
 
+-- Get current buff state directly from WoW via GetUnitField
+-- Returns: { [displaySlot] = {auraSlot, spellId, spellName, stacks, texture} }
+local function GetBuffSlotMap(guid)
+  if not guid or not GetUnitField or not SpellInfo then
+    return nil
+  end
+  
+  -- Check cache first
+  local now = GetTime()
+  local cached = slotMapCache[guid]
+  if cached and cached.buffMap and (now - cached.timestamp) < SLOT_MAP_CACHE_DURATION then
+    return cached.buffMap
+  end
+  
+  local auras = GetUnitField(guid, "aura")
+  if not auras then return nil end
+  
+  -- Fetch stacks array
+  local auraApps = GetUnitField(guid, "auraApplications")
+  
+  if debugStats.enabled then
+    debugStats.getunitfield_calls = debugStats.getunitfield_calls + 1
+  end
+  
+  local map = {}
+  local displaySlot = 0
+  
+  -- Buff aura slots are 1-32
+  for auraSlot = 1, 32 do
+    local spellId = auras[auraSlot]
+    if spellId and spellId > 0 then
+      displaySlot = displaySlot + 1
+      local spellName = SpellInfo(spellId)
+      local texture = libdebuff:GetSpellIcon(spellId)
+      
+      -- Get stacks from auraApplications
+      local stacks = auraApps and auraApps[auraSlot] or 0
+      if stacks == 0 then stacks = 1 end
+      
+      map[displaySlot] = {
+        auraSlot = auraSlot,
+        spellId = spellId,
+        spellName = spellName or "Unknown",
+        stacks = stacks,
+        texture = texture
+      }
+    end
+  end
+  
+  -- Cache the result (share cache with debuffs)
+  if not slotMapCache[guid] then
+    slotMapCache[guid] = { timestamp = now }
+  end
+  slotMapCache[guid].buffMap = map
+  slotMapCache[guid].timestamp = now
+  
+  return map
+end
+
 -- Get current debuff state directly from WoW via GetUnitField
 -- Returns: { [displaySlot] = {auraSlot, spellId, spellName, stacks, texture, dtype} }
 local function GetDebuffSlotMap(guid)
@@ -884,6 +943,93 @@ function libdebuff:UnitDebuff(unit, displaySlot)
 end
 
 -- ============================================================================
+-- API: UnitBuff (buffs from aura slots 1-32)
+-- ============================================================================
+
+function libdebuff:UnitBuff(unit, displaySlot)
+  local unitname = UnitName(unit)
+  local duration, timeleft = nil, -1
+  local rank = nil
+  local caster = nil
+  local effect = nil
+  local texture = nil
+  local stacks = 0
+
+  -- Nampower: Use GetUnitField for ALL buff data
+  if hasNampower and UnitExists then
+    local _, guid = UnitExists(unit)
+    if not guid then
+      -- Safety fallback: no GUID available
+      local bTexture, bStacks = UnitBuff(unit, displaySlot)
+      if bTexture then
+        scanner:SetUnitBuff(unit, displaySlot)
+        effect = scanner:Line(1) or ""
+      end
+      return effect, rank, bTexture, bStacks, duration, timeleft, caster
+    end
+    
+    -- For "player" ONLY: vanilla UnitBuff works perfectly
+    if unit == "player" then
+      local bTexture, bStacks = UnitBuff(unit, displaySlot)
+      texture = bTexture
+      stacks = bStacks
+      
+      if texture then
+        scanner:SetUnitBuff(unit, displaySlot)
+        effect = scanner:Line(1) or ""
+      end
+      
+      return effect, rank, texture, stacks, duration, timeleft, caster
+    end
+    
+    -- For ALL other units: Build compressed list from GetUnitField
+    local auras = GetUnitField(guid, "aura")
+    local auraApps = GetUnitField(guid, "auraApplications")
+    
+    if not auras then
+      return nil
+    end
+    
+    -- Build compressed list (skip empty slots)
+    local displayIndex = 0
+    for auraSlot = 1, 32 do
+      local spellId = auras[auraSlot]
+      if spellId and spellId > 0 then
+        displayIndex = displayIndex + 1
+        
+        -- Is this the slot we're looking for?
+        if displayIndex == displaySlot then
+          effect = SpellInfo(spellId)
+          texture = libdebuff:GetSpellIcon(spellId)
+          stacks = auraApps and auraApps[auraSlot] or 1
+          if stacks == 0 then stacks = 1 end
+          
+          return effect, rank, texture, stacks, duration, timeleft, caster, spellId
+        end
+      end
+    end
+    
+    -- displaySlot not found (> number of buffs)
+    return nil
+  end
+  
+  -- ============================================================================
+  -- FALLBACK: Legacy (non-Nampower) system
+  -- ============================================================================
+  
+  local bTexture, bStacks = UnitBuff(unit, displaySlot)
+  texture = bTexture
+  stacks = bStacks
+  
+  if texture then
+    scanner:SetUnitBuff(unit, displaySlot)
+    effect = scanner:Line(1) or ""
+  end
+  
+  return effect, rank, texture, stacks, duration, timeleft, caster
+end
+
+-- ============================================================================
 -- API: UnitOwnDebuff (only OUR debuffs)
 -- ============================================================================
 
@@ -1121,6 +1267,11 @@ if hasNampower then
       local refreshTime = GetTime()
       local myGuid = GetPlayerGUID()
       
+      if debugStats.enabled then
+        DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[CARNAGE CALLBACK]|r targetGuid=%s affected=%d", 
+          DebugGuid(targetGuid), table.getn(affectedSpells)))
+      end
+      
       for _, spellName in ipairs(affectedSpells) do
         -- Refresh in ownDebuffs
         if ownDebuffs[targetGuid] and ownDebuffs[targetGuid][spellName] then
@@ -1129,6 +1280,9 @@ if hasNampower then
           if debugStats.enabled then
             DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[CARNAGE]|r " .. spellName .. " refreshed (Carnage triggered - " .. duration .. "s)")
           end
+        elseif debugStats.enabled then
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("|cffff0000[CARNAGE SKIP]|r %s not found in ownDebuffs (guid=%s exists=%s)", 
+            spellName, DebugGuid(targetGuid), tostring(ownDebuffs[targetGuid] ~= nil)))
         end
         
         -- Refresh in allAuraCasts
@@ -2215,4 +2369,10 @@ _G.SlashCmdList["MEMCHECK"] = function()
   DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff============================================================|r")
 end
 
-DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r GetUnitField Edition loaded!")
+-- Delayed load message (after pfUI is fully loaded)
+local loadFrame = CreateFrame("Frame")
+loadFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+loadFrame:SetScript("OnEvent", function()
+  this:UnregisterEvent("PLAYER_ENTERING_WORLD")
+  DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r GetUnitField Edition loaded! UnitBuff() and UnitDebuff() available.")
+end)
