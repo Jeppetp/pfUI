@@ -976,6 +976,11 @@ function libdebuff:UnitDebuff(unit, displaySlot)
     end
     
     local slotData = slotMap[displaySlot]
+    effect = slotData.spellName                                  
+    texture = slotData.texture                                   
+    stacks = slotData.stacks                                     
+    dtype = slotData.dtype                                       
+    local auraSlot = slotData.auraSlot  
     
     -- Get caster info for this slot
     local slotCasterGuid, isOurs = GetSlotCaster(guid, auraSlot, effect)
