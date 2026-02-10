@@ -66,6 +66,17 @@ local function GetSortedSlots(auras, startSlot, endSlot)
   return occupiedSlots
 end
 
+-- Duration index lookup tables (Blizzard's duration category system)
+-- Centralized to avoid duplication (was duplicated 8× before)
+local STANDARD_DURATIONS = {
+  [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
+  [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
+}
+local CROSSREF_DURATIONS = {
+  [1] = 10, [3] = 30, [7] = 5, [8] = 15, [9] = 2,
+  [21] = 6, [23] = 20, [28] = 3, [29] = 12, [35] = 8, [39] = 120
+}
+
 local function BuffOnUpdate()
   if ( this.tick or 1) > GetTime() then return else this.tick = GetTime() + .2 end
   
@@ -225,11 +236,7 @@ local function BuffOnEnter()
                     end
                   elseif valueType == "d" then
                     local durationIndex = crossRefs[refId].durationIndex
-                    local durationTable = {
-                      [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
-                      [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
-                    }
-                    value = durationTable[durationIndex]
+                    value = CROSSREF_DURATIONS[durationIndex]
                   end
                   
                   if value then
@@ -250,11 +257,7 @@ local function BuffOnEnter()
               
               -- Duration placeholder ($d)
               if spellRec.durationIndex then
-                local durationTable = {
-                  [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
-                  [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
-                }
-                local durationValue = durationTable[spellRec.durationIndex]
+                local durationValue = STANDARD_DURATIONS[spellRec.durationIndex]
                 if durationValue then
                   tooltipText = string.gsub(tooltipText, "%$d", durationValue)
                 end
@@ -315,20 +318,7 @@ local function BuffOnEnter()
                   -- Duration - use duration index lookup table
                   local durationIndex = crossRefs[refId].durationIndex
                   -- Common duration indices (in seconds)
-                  local durationTable = {
-                    [1] = 10,   -- 10 sec
-                    [3] = 30,   -- 30 sec
-                    [7] = 5,    -- 5 sec
-                    [8] = 15,   -- 15 sec
-                    [9] = 2,    -- 2 sec
-                    [21] = 6,   -- 6 sec
-                    [23] = 20,  -- 20 sec
-                    [28] = 3,   -- 3 sec
-                    [29] = 12,  -- 12 sec
-                    [35] = 8,   -- 8 sec
-                    [39] = 120, -- 2 min
-                  }
-                  value = durationTable[durationIndex]
+                  value = CROSSREF_DURATIONS[durationIndex]
                 end
                 
                 if value then
@@ -368,11 +358,7 @@ local function BuffOnEnter()
             
             -- $d - Duration for current spell
             if spellRec.durationIndex then
-              local durationTable = {
-                [1] = 10, [3] = 30, [7] = 5, [8] = 15, [9] = 2,
-                [21] = 6, [23] = 20, [28] = 3, [29] = 12, [35] = 8, [39] = 120,
-              }
-              local duration = durationTable[spellRec.durationIndex]
+              local duration = STANDARD_DURATIONS[spellRec.durationIndex]
               if duration then
                 tooltipText = string.gsub(tooltipText, "%$d", duration)
               end
@@ -654,11 +640,7 @@ local function DebuffOnEnter()
                     end
                   elseif valueType == "d" then
                     local durationIndex = crossRefs[refId].durationIndex
-                    local durationTable = {
-                      [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
-                      [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
-                    }
-                    value = durationTable[durationIndex]
+                    value = CROSSREF_DURATIONS[durationIndex]
                   end
                   
                   if value then
@@ -679,11 +661,7 @@ local function DebuffOnEnter()
               
               -- Duration placeholder
               if spellRec.durationIndex then
-                local durationTable = {
-                  [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
-                  [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
-                }
-                local durationValue = durationTable[spellRec.durationIndex]
+                local durationValue = STANDARD_DURATIONS[spellRec.durationIndex]
                 if durationValue then
                   tooltipText = string.gsub(tooltipText, "%$d", durationValue)
                 end
@@ -750,11 +728,7 @@ local function DebuffOnEnter()
                     end
                   elseif valueType == "d" then
                     local durationIndex = crossRefs[refId].durationIndex
-                    local durationTable = {
-                      [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
-                      [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
-                    }
-                    value = durationTable[durationIndex]
+                    value = CROSSREF_DURATIONS[durationIndex]
                   end
                   
                   if value then
@@ -775,11 +749,7 @@ local function DebuffOnEnter()
               
               -- Duration placeholder
               if spellRec.durationIndex then
-                local durationTable = {
-                  [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
-                  [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
-                }
-                local durationValue = durationTable[spellRec.durationIndex]
+                local durationValue = STANDARD_DURATIONS[spellRec.durationIndex]
                 if durationValue then
                   tooltipText = string.gsub(tooltipText, "%$d", durationValue)
                 end
