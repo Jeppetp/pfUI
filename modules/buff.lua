@@ -473,9 +473,9 @@ pfUI:RegisterModule("buff", "vanilla:tbc", function ()
   -- This replaces 50 individual OnUpdate handlers with a single one
   pfUI.buff:SetScript("OnUpdate", function()
     local now = GetTime()
-    if not this.nextUpdate then this.nextUpdate = now + 0.2 end
+    if not this.nextUpdate then this.nextUpdate = now + 0.1 end
     if this.nextUpdate > now then return end
-    this.nextUpdate = now + 0.2
+    this.nextUpdate = now + 0.1
 
     -- Cache weapon enchant info once per update cycle
     local mh, mhtime, mhcharge, oh, ohtime, ohcharge = GetWeaponEnchantInfo()
