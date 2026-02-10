@@ -293,6 +293,7 @@ pfUI_translation["zhCN"] = {
   ["Enable Movable Bags"] = "启用可移动包裹",
   ["Enable Offscreen Frame Positions"] = "允许本插件所有框体移出屏幕边缘",
   ["Enable Overlap"] = "叠加显示",
+  ["Enable Player Levels"] ="启用玩家等级",
   ["Enable Party Chat Bubbles"] = "启用队伍聊天框气泡效果",
   ["Enable Pastel Colors"] = "使用轻淡柔和的色彩头像",
   ["Enable Pixel Perfect Borders"] = "启用像素完美边框",
