@@ -5,11 +5,17 @@ setfenv(1, pfUI:GetEnvironment())
 -- A pfUI library that detects and saves all ongoing debuffs of players, NPCs and enemies.
 -- 
 -- MAJOR REWRITE: Now uses GetUnitField for slot mapping instead of manual shifting.
--- Key insight: GetUnitField returns STABLE aura slots (33-48) that DON'T shift when 
--- debuffs expire. Only the display slots (UnitDebuff returns 1,2,3...) are compacted.
+-- Key insight: GetUnitField returns STABLE aura slots (33-48 in 1-based Lua arrays) that 
+-- DON'T shift when debuffs expire. Only the display slots (UnitDebuff returns 1,2,3...) 
+-- are compacted.
 --
 -- This eliminates ~400 lines of error-prone shift logic while maintaining full
 -- multi-caster tracking support.
+--
+-- PERFORMANCE OPTIMIZATION (Nampower 2.29+):
+-- Uses arg6 (auraSlot) parameter from DEBUFF_ADDED/REMOVED events to eliminate
+-- GetDebuffSlotMap() lookups. NOTE: arg6 is 0-based (32-47) but GetUnitField arrays 
+-- are 1-based (33-48), so we convert with +1. Falls back to GetUnitField if unavailable.
 --
 --  libdebuff:UnitDebuff(unit, id)
 --    Returns debuff informations on the given effect of the specified unit.
@@ -38,8 +44,8 @@ local hasNampower = false
 if GetNampowerVersion then
   local major, minor, patch = GetNampowerVersion()
   patch = patch or 0
-  -- Minimum required version: 2.27.2 (SPELL_FAILED_OTHER fix)
-  if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 2) then
+  -- Minimum required version: 2.31.0 (SPELL_FAILED_OTHER fix)
+  if major > 2 or (major == 2 and minor > 31) or (major == 2 and minor == 31 and patch >= 0) then
     hasNampower = true
   end
 end
@@ -69,7 +75,7 @@ nampowerCheckFrame:SetScript("OnEvent", function()
         patch = patch or 0
         local versionString = major .. "." .. minor .. "." .. patch
         
-        if major > 2 or (major == 2 and minor > 27) or (major == 2 and minor == 27 and patch >= 2) then
+        if major > 2 or (major == 2 and minor > 31) or (major == 2 and minor == 31 and patch >= 0) then
           DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Nampower v" .. versionString .. " detected - GetUnitField mode enabled!")
           
           -- Enable required Nampower CVars
@@ -119,12 +125,12 @@ nampowerCheckFrame:SetScript("OnEvent", function()
             end
           end
           
-        elseif major == 2 and minor == 27 and patch == 1 then
-          DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff] WARNING: Nampower v2.27.1 detected!|r")
-          DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff] Please update to v2.27.2 or higher!|r")
+        elseif major == 2 and minor == 31 and patch == 0 then
+          DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff] WARNING: Nampower v2.31.0 detected!|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00[libdebuff] Please update to v2.31.0 or higher!|r")
           StaticPopup_Show("LIBDEBUFF_NAMPOWER_UPDATE", versionString)
         else
-          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Debuff tracking disabled! Please update Nampower to v2.27.2 or higher.|r")
+          DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[libdebuff] Debuff tracking disabled! Please update Nampower to v2.31.0 or higher.|r")
           StaticPopup_Show("LIBDEBUFF_NAMPOWER_UPDATE", versionString)
         end
       else
@@ -209,19 +215,19 @@ local HIT_TRACKING_WINDOW = 0.1  -- Track hits within 100ms (AURA_CAST validatio
 -- ============================================================================
 
 StaticPopupDialogs["LIBDEBUFF_NAMPOWER_UPDATE"] = {
-  text = "Nampower Update Required!\n\nYour current version: %s\nRequired version: 2.27.2+\n\nPlease update Nampower!",
+  text = "Nampower Update Required!\n\nYour current version: %s\nRequired version: 2.31.0+\n\nPlease update Nampower!",
   button1 = "OK",
   timeout = 0,
   whileDead = 1,
   hideOnEscape = 1,
   preferredIndex = 3,
   OnAccept = function()
-    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Download: https://gitea.com/avitasia/nampower/releases/tag/v2.27.2")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99[libdebuff]|r Download: https://gitea.com/avitasia/nampower/releases/tag/v2.31.0")
   end,
 }
 
 StaticPopupDialogs["LIBDEBUFF_NAMPOWER_MISSING"] = {
-  text = "Nampower Not Found!\n\nNampower 2.27.2+ is required for pfUI Enhanced debuff tracking.\n\nPlease install Nampower.",
+  text = "Nampower Not Found!\n\nNampower 2.31.0+ is required for pfUI Enhanced debuff tracking.\n\nPlease install Nampower.",
   button1 = "OK",
   timeout = 0,
   whileDead = 1,
@@ -1528,12 +1534,13 @@ if hasNampower then
         
         -- APPLICATOR REFRESH: Immediately refresh passive proc debuffs when applicator spells hit
         RefreshApplicatorDebuffs(targetGuid, spellName, myGuid)
-      else
-        if debugStats.enabled and IsCurrentTarget(targetGuid) then
-          local reason = isPeriodicDamage and "periodic damage (auraType)" or "no recent cast (DoT tick)"
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff8888[DOT TICK SKIPPED]|r %s (%s)", 
-            GetDebugTimestamp(), spellName, reason))
-        end
+      -- Removed DOT TICK SKIPPED spam
+      -- else
+      --   if debugStats.enabled and IsCurrentTarget(targetGuid) then
+      --     local reason = isPeriodicDamage and "periodic damage (auraType)" or "no recent cast (DoT tick)"
+      --     DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff8888[DOT TICK SKIPPED]|r %s (%s)", 
+      --       GetDebugTimestamp(), spellName, reason))
+      --   end
       end
       
       -- CRIT-BASED REFRESH (Ignite etc.)
@@ -1651,8 +1658,9 @@ if hasNampower then
         local myGuid = GetPlayerGUID()
         -- Log if: current target OR player cast (for AoE without targetGuid)
         if spellName and (IsCurrentTarget(targetGuid or casterGuid) or (casterGuid == myGuid and not targetGuid)) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ccff[SPELL_GO]|r %s caster=%s target=%s numHit=%d numMissed=%d", 
-            GetDebugTimestamp(), spellName, DebugGuid(casterGuid), DebugGuid(targetGuid), numHit, numMissed))
+          local itemStr = (itemId and itemId > 0) and string.format(" itemId=%d", itemId) or ""
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cff00ccff[SPELL_GO]|r %s%s caster=%s target=%s numHit=%d numMissed=%d", 
+            GetDebugTimestamp(), spellName, itemStr, DebugGuid(casterGuid), DebugGuid(targetGuid), numHit, numMissed))
         end
       end
       
@@ -2113,9 +2121,14 @@ if hasNampower then
       
     elseif event == "DEBUFF_ADDED_OTHER" then
       local guid = arg1
-      local displaySlot = arg2  -- This is DISPLAY slot (1-16), NOT aura slot!
+      local displaySlot = arg2  -- Display slot (1-16), compacted
       local spellId = arg3
       local stacks = arg4
+      local auraLevel = arg5
+      local auraSlot_0based = arg6  -- NEW! Raw slot 0-based (32-47) from Nampower
+      
+      -- Convert 0-based (Nampower event) to 1-based (Lua GetUnitField array)
+      local auraSlot = auraSlot_0based and (auraSlot_0based + 1) or nil
       
       -- Invalidate slot map cache for this GUID
       slotMapCache[guid] = nil
@@ -2133,15 +2146,17 @@ if hasNampower then
         return
       end
       
-      -- Find the REAL aura slot (33-48) via GetUnitField
-      local auraSlot = nil
-      local slotMap = GetDebuffSlotMap(guid)
-      if slotMap and slotMap[displaySlot] then
-        auraSlot = slotMap[displaySlot].auraSlot
+      -- Get auraSlot from event parameter (Nampower 2.29+)
+      -- Fallback to GetUnitField lookup if not available
+      if not auraSlot then
+        local slotMap = GetDebuffSlotMap(guid)
+        if slotMap and slotMap[displaySlot] then
+          auraSlot = slotMap[displaySlot].auraSlot
+        end
       end
       
-      -- Fallback: Calculate aura slot if GetUnitField didn't work
-      -- (This assumes no gaps, which isn't always true, but better than nothing)
+      -- Final fallback: Calculate from displaySlot
+      -- (Assumes no gaps - not always true, but better than nothing)
       if not auraSlot then
         auraSlot = 32 + displaySlot
       end
@@ -2412,8 +2427,14 @@ if hasNampower then
       
     elseif event == "DEBUFF_REMOVED_OTHER" then
       local guid = arg1
-      local displaySlot = arg2  -- This is DISPLAY slot (1-16), NOT aura slot!
+      local displaySlot = arg2  -- Display slot (1-16), compacted
       local spellId = arg3
+      local stacks = arg4
+      local auraLevel = arg5
+      local auraSlot_0based = arg6  -- NEW! Raw slot 0-based (32-47) from Nampower
+      
+      -- Convert 0-based (Nampower event) to 1-based (Lua GetUnitField array)
+      local auraSlot = auraSlot_0based and (auraSlot_0based + 1) or nil
       
       -- Invalidate slot map cache for this GUID
       slotMapCache[guid] = nil
@@ -2428,8 +2449,8 @@ if hasNampower then
       if debugStats.enabled then
         debugStats.debuff_removed = debugStats.debuff_removed + 1
         if IsCurrentTarget(guid) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff9900[DEBUFF_REMOVED]|r display=%d %s", 
-            GetDebugTimestamp(), displaySlot, spellName))
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff9900[DEBUFF_REMOVED]|r display=%d aura=%d (0based=%d) %s", 
+            GetDebugTimestamp(), displaySlot, auraSlot or -1, auraSlot_0based or -1, spellName))
         end
       end
       
@@ -2439,15 +2460,17 @@ if hasNampower then
         return
       end
       
-      -- Find the auraSlot using displaySlot mapping
+      -- Get auraSlot from event parameter (Nampower 2.29+)
+      -- Fallback to displayToAura mapping if not available
+      local foundAuraSlot = auraSlot
+      if not foundAuraSlot and displayToAura[guid] and displayToAura[guid][displaySlot] then
+        foundAuraSlot = displayToAura[guid][displaySlot]
+      end
+      
       local wasOurs = false
       local removedCasterGuid = nil
-      local foundAuraSlot = nil
       
-      -- Use displayToAura mapping to find the correct auraSlot
-      if displayToAura[guid] and displayToAura[guid][displaySlot] then
-        foundAuraSlot = displayToAura[guid][displaySlot]
-        
+      if foundAuraSlot then
         -- Get ownership info for this specific slot
         if slotOwnership[guid] and slotOwnership[guid][foundAuraSlot] then
           local ownership = slotOwnership[guid][foundAuraSlot]
@@ -2464,7 +2487,7 @@ if hasNampower then
         end
         
         if debugStats.enabled and IsCurrentTarget(guid) then
-          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff9900[SLOT CLEARED]|r aura=%d %s wasOurs=%s caster=%s", 
+          DEFAULT_CHAT_FRAME:AddMessage(string.format("%s |cffff9900[SLOT CLEARED]|r aura=%d [arg6] %s wasOurs=%s caster=%s", 
             GetDebugTimestamp(), foundAuraSlot, spellName, tostring(wasOurs), DebugGuid(removedCasterGuid)))
         end
       end
