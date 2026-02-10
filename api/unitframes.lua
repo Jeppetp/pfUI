@@ -50,8 +50,87 @@ local function DoNothing()
 end
 
 local maxdurations = {}
+
+-- Helper function to collect and sort occupied aura slots
+local function GetSortedSlots(auras, startSlot, endSlot)
+  if not auras then return nil end
+  
+  local occupiedSlots = {}
+  for fieldSlot = startSlot, endSlot do
+    local spellId = auras[fieldSlot]
+    if spellId and spellId > 0 then
+      table.insert(occupiedSlots, fieldSlot)
+    end
+  end
+  table.sort(occupiedSlots)
+  return occupiedSlots
+end
+
 local function BuffOnUpdate()
   if ( this.tick or 1) > GetTime() then return else this.tick = GetTime() + .2 end
+  
+  -- NEW METHOD: GetUnitField + GetPlayerAuraDuration with SpellId verification
+  if GetUnitField and GetPlayerAuraDuration and UnitExists then
+    local _, guid = UnitExists("player")
+    
+    if guid then
+      local auras = GetUnitField(guid, "aura")
+      
+      if auras then
+        -- Collect and sort occupied buff slots (1-32)
+        local occupiedSlots = GetSortedSlots(auras, 1, 32)
+        
+        -- Now find the slot for this display position
+        local targetSlot = occupiedSlots[this.id]
+        
+        if targetSlot then
+          local spellId = auras[targetSlot]
+          
+          -- Store spellId for OnClick handler
+          this.spellId = spellId
+          
+          -- GetPlayerAuraDuration uses 0-based indexing (targetSlot - 1)
+          local durationSpellId, durationMs = GetPlayerAuraDuration(targetSlot - 1)
+          
+          -- CRITICAL: Verify SpellIds match to avoid shift issues
+          if durationSpellId == spellId then
+            -- SpellId matches! This is the correct buff
+            if durationMs and durationMs > 0 then
+              -- Buff has duration - show timer
+              local timeleft = durationMs / 1000
+              
+              -- Get texture for the key
+              local texture = nil
+              if libdebuff and libdebuff.GetSpellIcon then
+                texture = libdebuff:GetSpellIcon(spellId)
+              end
+              
+              -- Build unique key (texture + spellId)
+              local key = (texture or "") .. spellId
+              
+              -- Track max duration for this buff
+              if not maxdurations[key] then
+                maxdurations[key] = timeleft
+              elseif maxdurations[key] < timeleft then
+                maxdurations[key] = timeleft
+              end
+              
+              local start = GetTime() + timeleft - maxdurations[key]
+              CooldownFrame_SetTimer(this.cd, start, maxdurations[key], 1)
+            else
+              -- Buff has NO duration (permanent/passive) - clear timer
+              CooldownFrame_SetTimer(this.cd, 0, 0, 0)
+            end
+            return
+          end
+          
+          -- SpellId mismatch - something is out of sync, use fallback
+        end
+      end
+    end
+  end
+  
+  -- FALLBACK: Original Blizzard method
   local bid = GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL")
   local timeleft = GetPlayerBuffTimeLeft(bid)
   local texture = GetPlayerBuffTexture(bid)
@@ -101,6 +180,97 @@ local function BuffOnEnter()
 
   GameTooltip:SetOwner(this, "ANCHOR_BOTTOMRIGHT")
   if parent.label == "player" then
+    -- For player: Use GetUnitField + sorted slots (same as RefreshUnit and BuffOnUpdate)
+    if GetUnitField and UnitExists and GetSpellRec then
+      local _, guid = UnitExists("player")
+      local auras = guid and GetUnitField(guid, "aura")
+      
+      if auras then
+        -- Collect and sort occupied buff slots (1-32)
+        local occupiedSlots = GetSortedSlots(auras, 1, 32)
+        
+        -- Find the slot for this display position
+        local targetSlot = occupiedSlots[this.id]
+        
+        if targetSlot then
+          local spellId = auras[targetSlot]
+          local spellRec = GetSpellRec(spellId)
+          
+          if spellRec then
+            GameTooltip:AddLine(spellRec.name, 1, 1, 1)
+            if spellRec.rank and spellRec.rank ~= "" then
+              GameTooltip:AddLine(spellRec.rank, 0.5, 0.5, 0.5)
+            end
+            
+            -- Format tooltip (same as target frame)
+            local tooltipText = spellRec.tooltip or spellRec.description or ""
+            if tooltipText ~= "" then
+              -- Cross-spell references ($12345s1, $12345d1)
+              local crossRefs = {}
+              for refSpellId, valueType, index in string.gfind(tooltipText, "%$(%d+)([sd])(%d)") do
+                local refId = tonumber(refSpellId)
+                local idx = tonumber(index)
+                
+                if not crossRefs[refId] then
+                  crossRefs[refId] = GetSpellRec(refId)
+                end
+                
+                if crossRefs[refId] then
+                  local placeholder = "$" .. refSpellId .. valueType .. index
+                  local value = nil
+                  
+                  if valueType == "s" then
+                    if crossRefs[refId].effectBasePoints and crossRefs[refId].effectBasePoints[idx] then
+                      value = crossRefs[refId].effectBasePoints[idx] + 1
+                    end
+                  elseif valueType == "d" then
+                    local durationIndex = crossRefs[refId].durationIndex
+                    local durationTable = {
+                      [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
+                      [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
+                    }
+                    value = durationTable[durationIndex]
+                  end
+                  
+                  if value then
+                    tooltipText = string.gsub(tooltipText, placeholder, value)
+                  end
+                end
+              end
+              
+              -- Standard placeholders ($s1, $S1, etc.)
+              if spellRec.effectBasePoints then
+                for i, basePoint in ipairs(spellRec.effectBasePoints) do
+                  local value = basePoint + 1
+                  tooltipText = string.gsub(tooltipText, "%$s" .. i, value)
+                  tooltipText = string.gsub(tooltipText, "%$S" .. i, value)
+                  tooltipText = string.gsub(tooltipText, "%$%/" .. "1000;S" .. i, math.floor(value/10))
+                end
+              end
+              
+              -- Duration placeholder ($d)
+              if spellRec.durationIndex then
+                local durationTable = {
+                  [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
+                  [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
+                }
+                local durationValue = durationTable[spellRec.durationIndex]
+                if durationValue then
+                  tooltipText = string.gsub(tooltipText, "%$d", durationValue)
+                end
+              end
+              
+              GameTooltip:AddLine(tooltipText, 1, 0.82, 0, 1)
+            end
+            
+            GameTooltip:Show()
+            return
+          end
+        end
+      end
+    end
+    
+    -- Fallback to Blizzard tooltip
     GameTooltip:SetPlayerBuff(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL"))
   else
     -- For non-player units: Build tooltip from GetSpellRec data
@@ -236,7 +406,33 @@ local function BuffOnEnter()
   end
 
   if IsShiftKeyDown() then
-    local texture = parent.label == "player" and GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL")) or UnitBuff(parent.label .. parent.id, this.id)
+    local texture = nil
+    
+    if parent.label == "player" and GetUnitField and UnitExists and libdebuff then
+      -- For player: Use GetUnitField + sorted slots to find correct texture
+      local _, guid = UnitExists("player")
+      local auras = guid and GetUnitField(guid, "aura")
+      
+      if auras then
+        -- Collect and sort occupied buff slots (1-32)
+        local occupiedSlots = GetSortedSlots(auras, 1, 32)
+        
+        -- Find the slot for this display position
+        local targetSlot = occupiedSlots[this.id]
+        if targetSlot then
+          local spellId = auras[targetSlot]
+          if libdebuff.GetSpellIcon then
+            texture = libdebuff:GetSpellIcon(spellId)
+          end
+        end
+      end
+    elseif parent.label == "player" then
+      -- Fallback for player without GetUnitField
+      texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL"))
+    else
+      -- For other units
+      texture = UnitBuff(parent.label .. parent.id, this.id)
+    end
 
     -- slot is empty, nothing to compare against
     if not texture then return end
@@ -282,12 +478,98 @@ end
 
 local function BuffOnClick()
   if this:GetParent().label == "player" then
-    CancelPlayerBuff(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HELPFUL"))
+    -- Use SpellID-based cancellation (same method as buff.lua)
+    -- This is 100% correct even with slot shifts and gaps
+    if this.spellId and GetPlayerBuffID then
+      local ix = 0
+      while true do
+        local blizzSlot = GetPlayerBuff(ix, "HELPFUL")
+        if blizzSlot == -1 then break end
+        
+        -- Get SpellID from this Blizzard slot
+        local buffSpellId = GetPlayerBuffID(blizzSlot)
+        -- Handle negative SpellIDs (convert to positive)
+        buffSpellId = (buffSpellId < -1) and (buffSpellId + 65536) or buffSpellId
+        
+        if buffSpellId == this.spellId then
+          CancelPlayerBuff(blizzSlot)
+          return
+        end
+        
+        ix = ix + 1
+        
+        -- Safety: Don't loop forever
+        if ix > 32 then break end
+      end
+    else
+      -- Fallback if GetPlayerBuffID not available or spellId not set
+      CancelPlayerBuff(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id, "HELPFUL"))
+    end
   end
 end
 
 local function DebuffOnUpdate()
   if ( this.tick or 1) > GetTime() then return else this.tick = GetTime() + .2 end
+  
+  -- NEW METHOD: GetUnitField + GetPlayerAuraDuration with SpellId verification
+  if GetUnitField and GetPlayerAuraDuration and UnitExists then
+    local _, guid = UnitExists("player")
+    
+    if guid then
+      local auras = GetUnitField(guid, "aura")
+      
+      if auras then
+        -- Collect and sort occupied debuff slots (33-48)
+        local occupiedSlots = GetSortedSlots(auras, 33, 48)
+        
+        -- Find the slot for this display position
+        local targetSlot = occupiedSlots[this.id]
+        
+        if targetSlot then
+          local spellId = auras[targetSlot]
+          
+          -- GetPlayerAuraDuration uses 0-based indexing (targetSlot - 1)
+          local durationSpellId, durationMs = GetPlayerAuraDuration(targetSlot - 1)
+          
+          -- CRITICAL: Verify SpellIds match
+          if durationSpellId == spellId then
+            -- SpellId matches! This is the correct debuff
+            if durationMs and durationMs > 0 then
+              -- Debuff has duration - show timer
+              local timeleft = durationMs / 1000
+              
+              -- Get texture for the key
+              local texture = nil
+              if libdebuff and libdebuff.GetSpellIcon then
+                texture = libdebuff:GetSpellIcon(spellId)
+              end
+              
+              -- Build unique key
+              local key = (texture or "") .. spellId
+              
+              -- Track max duration
+              if not maxdurations[key] then
+                maxdurations[key] = timeleft
+              elseif maxdurations[key] < timeleft then
+                maxdurations[key] = timeleft
+              end
+              
+              local start = GetTime() + timeleft - maxdurations[key]
+              CooldownFrame_SetTimer(this.cd, start, maxdurations[key], 1)
+            else
+              -- Debuff has NO duration (permanent) - clear timer
+              CooldownFrame_SetTimer(this.cd, 0, 0, 0)
+            end
+            return
+          end
+          
+          -- Mismatch - use fallback
+        end
+      end
+    end
+  end
+  
+  -- FALLBACK: Original Blizzard method
   local bid = GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HARMFUL")
   local timeleft = GetPlayerBuffTimeLeft(bid)
   local texture = GetPlayerBuffTexture(bid)
@@ -327,12 +609,193 @@ local function DebuffOnEnter()
 
   GameTooltip:SetOwner(this, "ANCHOR_BOTTOMRIGHT")
   if this:GetParent().label == "player" then
+    -- For player: Use GetUnitField + sorted slots (same as DebuffOnUpdate)
+    if GetUnitField and UnitExists and GetSpellRec then
+      local _, guid = UnitExists("player")
+      local auras = guid and GetUnitField(guid, "aura")
+      
+      if auras then
+        -- Collect and sort occupied debuff slots (33-48)
+        local occupiedSlots = GetSortedSlots(auras, 33, 48)
+        
+        -- Find the slot for this display position
+        local targetSlot = occupiedSlots[this.id]
+        
+        if targetSlot then
+          local spellId = auras[targetSlot]
+          local spellRec = GetSpellRec(spellId)
+          
+          if spellRec then
+            GameTooltip:AddLine(spellRec.name, 1, 1, 1)
+            if spellRec.rank and spellRec.rank ~= "" then
+              GameTooltip:AddLine(spellRec.rank, 0.5, 0.5, 0.5)
+            end
+            
+            -- Format tooltip (same as target frame)
+            local tooltipText = spellRec.tooltip or spellRec.description or ""
+            if tooltipText ~= "" then
+              -- Cross-spell references
+              local crossRefs = {}
+              for refSpellId, valueType, index in string.gfind(tooltipText, "%$(%d+)([sd])(%d)") do
+                local refId = tonumber(refSpellId)
+                local idx = tonumber(index)
+                
+                if not crossRefs[refId] then
+                  crossRefs[refId] = GetSpellRec(refId)
+                end
+                
+                if crossRefs[refId] then
+                  local placeholder = "$" .. refSpellId .. valueType .. index
+                  local value = nil
+                  
+                  if valueType == "s" then
+                    if crossRefs[refId].effectBasePoints and crossRefs[refId].effectBasePoints[idx] then
+                      value = crossRefs[refId].effectBasePoints[idx] + 1
+                    end
+                  elseif valueType == "d" then
+                    local durationIndex = crossRefs[refId].durationIndex
+                    local durationTable = {
+                      [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
+                      [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
+                    }
+                    value = durationTable[durationIndex]
+                  end
+                  
+                  if value then
+                    tooltipText = string.gsub(tooltipText, placeholder, value)
+                  end
+                end
+              end
+              
+              -- Standard placeholders
+              if spellRec.effectBasePoints then
+                for i, basePoint in ipairs(spellRec.effectBasePoints) do
+                  local value = basePoint + 1
+                  tooltipText = string.gsub(tooltipText, "%$s" .. i, value)
+                  tooltipText = string.gsub(tooltipText, "%$S" .. i, value)
+                  tooltipText = string.gsub(tooltipText, "%$%/" .. "1000;S" .. i, math.floor(value/10))
+                end
+              end
+              
+              -- Duration placeholder
+              if spellRec.durationIndex then
+                local durationTable = {
+                  [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
+                  [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
+                }
+                local durationValue = durationTable[spellRec.durationIndex]
+                if durationValue then
+                  tooltipText = string.gsub(tooltipText, "%$d", durationValue)
+                end
+              end
+              
+              GameTooltip:AddLine(tooltipText, 1, 0.82, 0, 1)
+            end
+            
+            GameTooltip:Show()
+            return
+          end
+        end
+      end
+    end
+    
+    -- Fallback to Blizzard tooltip
     GameTooltip:SetPlayerBuff(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HARMFUL"))
   else
     local unitstr = this:GetParent().label .. this:GetParent().id
     local parent = this:GetParent()
     
-    -- For "only own debuffs" mode: find the REAL slot by matching spell name AND caster
+    -- Try GetUnitField + GetSpellRec for other units too (for rank display)
+    if GetUnitField and UnitExists and GetSpellRec then
+      local _, guid = UnitExists(unitstr)
+      local auras = guid and GetUnitField(guid, "aura")
+      
+      if auras then
+        -- Collect and sort occupied debuff slots (33-48)
+        local occupiedSlots = GetSortedSlots(auras, 33, 48)
+        
+        -- Find the slot for this display position
+        local targetSlot = occupiedSlots[this.id]
+        
+        if targetSlot then
+          local spellId = auras[targetSlot]
+          local spellRec = GetSpellRec(spellId)
+          
+          if spellRec then
+            GameTooltip:AddLine(spellRec.name, 1, 1, 1)
+            if spellRec.rank and spellRec.rank ~= "" then
+              GameTooltip:AddLine(spellRec.rank, 0.5, 0.5, 0.5)
+            end
+            
+            -- Format tooltip
+            local tooltipText = spellRec.tooltip or spellRec.description or ""
+            if tooltipText ~= "" then
+              -- Cross-spell references
+              local crossRefs = {}
+              for refSpellId, valueType, index in string.gfind(tooltipText, "%$(%d+)([sd])(%d)") do
+                local refId = tonumber(refSpellId)
+                local idx = tonumber(index)
+                
+                if not crossRefs[refId] then
+                  crossRefs[refId] = GetSpellRec(refId)
+                end
+                
+                if crossRefs[refId] then
+                  local placeholder = "$" .. refSpellId .. valueType .. index
+                  local value = nil
+                  
+                  if valueType == "s" then
+                    if crossRefs[refId].effectBasePoints and crossRefs[refId].effectBasePoints[idx] then
+                      value = crossRefs[refId].effectBasePoints[idx] + 1
+                    end
+                  elseif valueType == "d" then
+                    local durationIndex = crossRefs[refId].durationIndex
+                    local durationTable = {
+                      [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
+                      [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
+                    }
+                    value = durationTable[durationIndex]
+                  end
+                  
+                  if value then
+                    tooltipText = string.gsub(tooltipText, placeholder, value)
+                  end
+                end
+              end
+              
+              -- Standard placeholders
+              if spellRec.effectBasePoints then
+                for i, basePoint in ipairs(spellRec.effectBasePoints) do
+                  local value = basePoint + 1
+                  tooltipText = string.gsub(tooltipText, "%$s" .. i, value)
+                  tooltipText = string.gsub(tooltipText, "%$S" .. i, value)
+                  tooltipText = string.gsub(tooltipText, "%$%/" .. "1000;S" .. i, math.floor(value/10))
+                end
+              end
+              
+              -- Duration placeholder
+              if spellRec.durationIndex then
+                local durationTable = {
+                  [1] = 10, [3] = 30, [6] = 60, [8] = 120, [9] = 180,
+                  [10] = 300, [11] = 600, [21] = 3, [23] = 5, [27] = 15
+                }
+                local durationValue = durationTable[spellRec.durationIndex]
+                if durationValue then
+                  tooltipText = string.gsub(tooltipText, "%$d", durationValue)
+                end
+              end
+              
+              GameTooltip:AddLine(tooltipText, 1, 0.82, 0, 1)
+            end
+            
+            GameTooltip:Show()
+            return
+          end
+        end
+      end
+    end
+    
+    -- Fallback: For "only own debuffs" mode: find the REAL slot by matching spell name AND caster
     if parent.config and parent.config.selfdebuff == "1" and libdebuff then
       -- Get the spell name from our filtered list
       local ownDebuffName = libdebuff:UnitOwnDebuff(unitstr, this.id)
@@ -350,7 +813,7 @@ local function DebuffOnEnter()
       end
     end
     
-    -- Normal mode: use visual id directly
+    -- Fallback: Normal mode - use Blizzard tooltip
     GameTooltip:SetUnitDebuff(unitstr, this.id)
   end
 end
@@ -361,6 +824,30 @@ end
 
 local function DebuffOnClick()
   if this:GetParent().label == "player" then
+    -- Use GetUnitField + sorted slots to find correct slot to cancel
+    if GetUnitField and UnitExists then
+      local _, guid = UnitExists("player")
+      local auras = guid and GetUnitField(guid, "aura")
+      
+      if auras then
+        -- Collect and sort occupied debuff slots (33-48)
+        local occupiedSlots = GetSortedSlots(auras, 33, 48)
+        
+        -- Find the slot for this display position
+        local targetSlot = occupiedSlots[this.id]
+        
+        if targetSlot then
+          -- targetSlot is GetUnitField slot (1-based)
+          -- CancelPlayerBuff uses 0-based indexing
+          -- Just convert directly!
+          local blizzSlot = targetSlot - 1
+          CancelPlayerBuff(blizzSlot)
+          return
+        end
+      end
+    end
+    
+    -- Fallback
     CancelPlayerBuff(GetPlayerBuff(PLAYER_BUFF_START_ID+this.id,"HARMFUL"))
   end
 end
@@ -2260,31 +2747,115 @@ function pfUI.uf:RefreshUnit(unit, component)
   if unit.buffs and ( component == "all" or component == "aura" ) then
     local texture, stacks
 
-    for i=1, unit.config.bufflimit do
-      if not unit.buffs[i] then break end
-
-      if unit.label == "player" then
-        stacks = GetPlayerBuffApplications(GetPlayerBuff(PLAYER_BUFF_START_ID+i,"HELPFUL"))
-        texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+i,"HELPFUL"))
-      else
-        texture, stacks = pfUI.uf:DetectBuff(unitstr, i)
-      end
-
-      unit.buffs[i].texture:SetTexture(texture)
-
-      if texture then
-        unit.buffs[i]:Show()
-
-        if stacks > 1 then
-          unit.buffs[i].stacks:SetText(stacks)
-        else
-          unit.buffs[i].stacks:SetText("")
+    -- For ALL units: try GetUnitField + sorted slots if available
+    if GetUnitField and UnitExists then
+      local _, guid = UnitExists(unit.label .. unit.id)
+      local auras = guid and GetUnitField(guid, "aura")
+      
+      if auras then
+        -- Collect and sort occupied buff slots (1-32)
+        local occupiedSlots = GetSortedSlots(auras, 1, 32)
+        
+        -- Now display buffs based on sorted slots
+        for i=1, unit.config.bufflimit do
+          if not unit.buffs[i] then break end
+          
+          local targetSlot = occupiedSlots[i]
+          
+          if targetSlot then
+            local spellId = auras[targetSlot]
+            
+            -- Get icon from libdebuff
+            texture = nil
+            if libdebuff and libdebuff.GetSpellIcon then
+              texture = libdebuff:GetSpellIcon(spellId)
+            end
+            
+            -- Get stacks from GetUnitField  
+            local auraApplications = GetUnitField(guid, "auraApplications")
+            stacks = (auraApplications and auraApplications[targetSlot]) or 0
+          else
+            texture = nil
+            stacks = 0
+          end
+          
+          unit.buffs[i].texture:SetTexture(texture)
+          
+          if texture then
+            unit.buffs[i]:Show()
+            
+            if stacks > 1 then
+              unit.buffs[i].stacks:SetText(stacks)
+            else
+              unit.buffs[i].stacks:SetText("")
+            end
+          else
+            unit.buffs[i]:Hide()
+            -- Clear timer when buff is removed
+            if unit.buffs[i].cd then
+              CooldownFrame_SetTimer(unit.buffs[i].cd, 0, 0, 0)
+            end
+          end
         end
       else
-        unit.buffs[i]:Hide()
-        -- Clear timer when buff is removed
-        if unit.buffs[i].cd then
-          CooldownFrame_SetTimer(unit.buffs[i].cd, 0, 0, 0)
+        -- No aura data (out of range) - use old method as fallback
+        for i=1, unit.config.bufflimit do
+          if not unit.buffs[i] then break end
+
+          if unit.label == "player" then
+            stacks = GetPlayerBuffApplications(GetPlayerBuff(PLAYER_BUFF_START_ID+i,"HELPFUL"))
+            texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+i,"HELPFUL"))
+          else
+            texture, stacks = pfUI.uf:DetectBuff(unitstr, i)
+          end
+
+          unit.buffs[i].texture:SetTexture(texture)
+
+          if texture then
+            unit.buffs[i]:Show()
+
+            if stacks > 1 then
+              unit.buffs[i].stacks:SetText(stacks)
+            else
+              unit.buffs[i].stacks:SetText("")
+            end
+          else
+            unit.buffs[i]:Hide()
+            -- Clear timer when buff is removed
+            if unit.buffs[i].cd then
+              CooldownFrame_SetTimer(unit.buffs[i].cd, 0, 0, 0)
+            end
+          end
+        end
+      end
+    else
+      -- No GetUnitField: use old method (fallback for non-Nampower)
+      for i=1, unit.config.bufflimit do
+        if not unit.buffs[i] then break end
+
+        if unit.label == "player" then
+          stacks = GetPlayerBuffApplications(GetPlayerBuff(PLAYER_BUFF_START_ID+i,"HELPFUL"))
+          texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+i,"HELPFUL"))
+        else
+          texture, stacks = pfUI.uf:DetectBuff(unitstr, i)
+        end
+
+        unit.buffs[i].texture:SetTexture(texture)
+
+        if texture then
+          unit.buffs[i]:Show()
+
+          if stacks > 1 then
+            unit.buffs[i].stacks:SetText(stacks)
+          else
+            unit.buffs[i].stacks:SetText("")
+          end
+        else
+          unit.buffs[i]:Hide()
+          -- Clear timer when buff is removed
+          if unit.buffs[i].cd then
+            CooldownFrame_SetTimer(unit.buffs[i].cd, 0, 0, 0)
+          end
         end
       end
     end
@@ -2345,7 +2916,68 @@ function pfUI.uf:RefreshUnit(unit, component)
         invert_h * ((row+buffrow)*(multiply*default_border + unit.config.debuffsize + 1) + (multiply*default_border + 1)))
       end
 
-      if unit.label == "player" then
+      if GetUnitField and UnitExists then
+        -- For ALL units: try GetUnitField + sorted slots
+        local _, guid = UnitExists(unitstr)
+        local auras = guid and GetUnitField(guid, "aura")
+        
+        if auras then
+          -- Collect and sort occupied debuff slots (33-48)
+          local occupiedSlots = GetSortedSlots(auras, 33, 48)
+          
+          -- Find the slot for this display position
+          local targetSlot = occupiedSlots[i]
+          
+          if targetSlot then
+            local spellId = auras[targetSlot]
+            
+            -- Get icon from libdebuff
+            texture = nil
+            if libdebuff and libdebuff.GetSpellIcon then
+              texture = libdebuff:GetSpellIcon(spellId)
+            end
+            
+            -- Get stacks from GetUnitField
+            local auraApplications = GetUnitField(guid, "auraApplications")
+            stacks = (auraApplications and auraApplications[targetSlot]) or 0
+            
+            -- Get dispel type - need to use GetSpellRec
+            dtype = nil
+            if GetSpellRec then
+              local spellRec = GetSpellRec(spellId)
+              if spellRec and spellRec.dispel then
+                -- Map dispel IDs to type names
+                local dispelTypes = {
+                  [0] = "none",
+                  [1] = "Magic",
+                  [2] = "Curse",
+                  [3] = "Disease",
+                  [4] = "Poison"
+                }
+                dtype = dispelTypes[spellRec.dispel] or "none"
+              end
+            end
+          else
+            texture = nil
+            stacks = 0
+            dtype = nil
+          end
+        else
+          -- No aura data (out of range) - use fallback methods
+          if unit.label == "player" then
+            texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
+            stacks = GetPlayerBuffApplications(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
+            dtype = GetPlayerBuffDispelType(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
+          elseif selfdebuff == "1" then
+            _, _, texture, stacks, dtype = libdebuff:UnitOwnDebuff(unitstr, i)
+          elseif libdebuff then
+            _, _, texture, stacks, dtype = libdebuff:UnitDebuff(unitstr, i)
+          else
+            texture, stacks, dtype = UnitDebuff(unitstr, i)
+          end
+        end
+      elseif unit.label == "player" then
+        -- Fallback for player without GetUnitField
         texture = GetPlayerBuffTexture(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
         stacks = GetPlayerBuffApplications(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
         dtype = GetPlayerBuffDispelType(GetPlayerBuff(PLAYER_BUFF_START_ID+i, "HARMFUL"))
