@@ -76,7 +76,8 @@ local forcedDurations = {
 
   -- Target spells that return no duration from AURA_CAST and need hardcoded durations.
   -- ["Spell Name"] = { duration = X, refreshOnMelee = true/false, applicatorSpells = {...}/false },
-  ["Pain Spike"]               = { duration = 5,  refreshOnMelee = false, applicatorSpells = false },
+  ["Pain Spike"]                = { duration = 5,  refreshOnMelee = false, applicatorSpells = false },
+  ["Pounce Bleed"]              = { duration = 18,  refreshOnMelee = false, applicatorSpells = {"Pounce"} },
 
 
 }
