@@ -269,25 +269,106 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
     -- reinitialize all active buffs
     local selfdebuff = frame.config.selfdebuff == "1"
 
+    -- Clear buffs array
     for i=1,32 do
-      local timeleft, texture, name, stacks, duration = GetBuffData(frame.unit, i, frame.type, selfdebuff)
-      timeleft = timeleft or 0
-      duration = duration or 0
+      frame.buffs[i][1] = 0
+      frame.buffs[i][2] = nil
+      frame.buffs[i][3] = nil
+      frame.buffs[i][4] = nil
+      frame.buffs[i][5] = 0
+      frame.buffs[i][6] = 0
+      frame.buffs[i][7] = nil
+    end
 
-      if texture and name and name ~= "" and BuffIsVisible(frame.config, name) then
-        frame.buffs[i][1] = timeleft
-        frame.buffs[i][2] = i
-        frame.buffs[i][3] = name
-        frame.buffs[i][4] = texture
-        frame.buffs[i][5] = stacks
-        frame.buffs[i][6] = duration  -- Store duration
-      else
-        frame.buffs[i][1] = 0
-        frame.buffs[i][2] = nil
-        frame.buffs[i][3] = nil
-        frame.buffs[i][4] = nil
-        frame.buffs[i][5] = 0
-        frame.buffs[i][6] = 0
+    if frame.unit == "player" then
+      -- Player buffs: Use old display-slot based iteration
+      for i=1,32 do
+        local timeleft, texture, name, stacks, duration = GetBuffData(frame.unit, i, frame.type, selfdebuff)
+        timeleft = timeleft or 0
+        duration = duration or 0
+
+        if texture and name and name ~= "" and BuffIsVisible(frame.config, name) then
+          frame.buffs[i][1] = timeleft
+          frame.buffs[i][2] = i
+          frame.buffs[i][3] = name
+          frame.buffs[i][4] = texture
+          frame.buffs[i][5] = stacks
+          frame.buffs[i][6] = duration
+          local _, playerGuid = UnitExists("player")
+          frame.buffs[i][7] = playerGuid  -- Player GUID
+        end
+      end
+    else
+      -- Target debuffs: Use GetDebuffSlotMap to iterate over STABLE aura slots
+      if libdebuff and libdebuff.GetDebuffSlotMap and UnitExists then
+        if UnitExists(frame.unit) then
+          -- Pass unitToken directly - use DOT operator, not colon (it's not a method)
+          local slotMap = libdebuff.GetDebuffSlotMap(frame.unit)
+          
+          -- DEBUG: Show what slotMap contains (throttled to once per second)
+          if slotMap then
+            local count = 0
+            for _ in pairs(slotMap) do count = count + 1 end
+            if count > 0 then
+              local now = GetTime()
+              if not frame.lastDebugTime or (now - frame.lastDebugTime) > 1.0 then
+                frame.lastDebugTime = now
+                --DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff00ffff[GetDebuffSlotMap]|r Got %d debuffs:", count))
+                for displaySlot, slotData in pairs(slotMap) do
+                  --[[DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                    "  display=%d aura=%d spell=%s",
+                    displaySlot, slotData.auraSlot or 0, slotData.spellName or "nil"
+                  ))--]]
+                end
+              end
+            end
+          end
+          
+          if slotMap then
+            local buffIndex = 1
+            for displaySlot, slotData in pairs(slotMap) do
+              if buffIndex <= 32 then
+                local auraSlot = slotData.auraSlot
+                local spellName = slotData.spellName
+                local texture = slotData.texture
+                local stacks = slotData.stacks
+                
+                -- Get timing and caster from libdebuff
+                local name, rank, tex, st, dtype, duration, timeleft, casterGuid = libdebuff:UnitDebuff(frame.unit, displaySlot)
+                
+                if name and texture and BuffIsVisible(frame.config, name) then
+                  -- Apply selfdebuff filter
+                  local shouldShow = true
+                  if selfdebuff then
+                    local _, playerGuid = UnitExists("player")
+                    shouldShow = (casterGuid == playerGuid)
+                  end
+                  
+                  if shouldShow then
+                    frame.buffs[buffIndex][1] = timeleft or 0
+                    frame.buffs[buffIndex][2] = displaySlot  -- Keep displaySlot for compatibility
+                    frame.buffs[buffIndex][3] = name
+                    frame.buffs[buffIndex][4] = texture
+                    frame.buffs[buffIndex][5] = stacks or 1
+                    frame.buffs[buffIndex][6] = duration or 0
+                    frame.buffs[buffIndex][7] = casterGuid  -- Caster GUID (unique per caster!)
+                    frame.buffs[buffIndex][8] = auraSlot    -- STABLE aura slot (33-48)
+                    
+                    -- DEBUG: Show ALL Rips (not throttled)
+                    if name == "Rip" then
+                      DEFAULT_CHAT_FRAME:AddMessage(string.format(
+                        "|cff00ff00[RefreshBuff #%d]|r Rip: displaySlot=%d auraSlot=%d caster=%s timeleft=%.1f",
+                        buffIndex, displaySlot, auraSlot, casterGuid and string.sub(tostring(casterGuid), -8) or "nil", timeleft or -1
+                      ))
+                    end
+                    
+                    buffIndex = buffIndex + 1
+                  end
+                end
+              end
+            end
+          end
+        end
       end
     end
 
@@ -300,14 +381,32 @@ pfUI:RegisterModule("buffwatch", "vanilla:tbc", function ()
         and data[3] and data[3] ~= "" -- buff has a name
         and data[4] and data[4] ~= "" -- buff has a texture
       then
-        -- For player: no slot in uuid (slots shift when other buffs expire)
-        -- For target with selfdebuff: use texture+name only (slots can shift when higher priority debuffs overwrite)
-        -- For target without selfdebuff: include slot (multiple players can have same debuff, slot identifies who)
+        -- UUID Generation Strategy:
+        -- Player buffs: texture + name (player only has own buffs)
+        -- Target debuffs: texture + name + auraSlot (STABLE slot 33-48 that never shifts!)
+        --   Each caster's debuff has a unique auraSlot that stays constant
+        --   Even when display slots shift (1→2→3), auraSlot stays same (35, 42, etc)
         local uuid
-        if frame.unit == "player" or selfdebuff then
+        if frame.unit == "player" then
           uuid = data[4] .. data[3] -- texture + name only
         else
-          uuid = data[4] .. data[3] .. data[2] -- texture + name + slot
+          -- Use stable auraSlot if available (data[8]), otherwise casterGUID (data[7])
+          local stableId = data[8] or data[7] or data[2]
+          uuid = data[4] .. data[3] .. tostring(stableId)
+        end
+        
+        -- DEBUG (throttled)
+        if data[3] == "Rip" then
+          local now = GetTime()
+          if not frame.lastUuidDebugTime or (now - frame.lastUuidDebugTime) > 1.0 then
+            frame.lastUuidDebugTime = now
+            DEFAULT_CHAT_FRAME:AddMessage(string.format(
+              "|cffff00ff[UUID]|r Rip: auraSlot=%s caster=%s uuid_end=%s timeleft=%.1f",
+              tostring(data[8] or "nil"), 
+              data[7] and string.sub(tostring(data[7]), -8) or "nil",
+              string.sub(uuid, -16), data[1]
+            ))
+          end
         end
 
         -- update bar data
