@@ -192,8 +192,10 @@ local function GetPlayerGuid()
   return cachedPlayerGuid
 end
 
+local bladeRushRank = 0
+
 -- ============================================================================
--- CARNAGE TALENT TRACKING
+-- CARNAGE + BLADE RUSH TALENT TRACKING
 -- ============================================================================
 
 local function UpdateCarnageRank()
@@ -201,6 +203,13 @@ local function UpdateCarnageRank()
   local _, _, _, _, rank = GetTalentInfo(2, 17)
   carnageRank = rank or 0
 end
+
+local function UpdateBladeRushRank()
+  if playerClass ~= "ROGUE" then return end
+  local _, _, _, _, rank = GetTalentInfo(2, 16)
+  bladeRushRank = rank or 0
+end
+
 
 -- Talent update listener (own frame, independent of libdebuff)
 local talentFrame = CreateFrame("Frame")
@@ -214,6 +223,7 @@ talentFrame:SetScript("OnEvent", function()
     return
   end
   UpdateCarnageRank()
+  UpdateBladeRushRank()
   -- Cache player GUID on login
   if event == "PLAYER_ENTERING_WORLD" then
     GetPlayerGuid()
@@ -397,6 +407,10 @@ function lib:ScheduleCarnageCheck(targetGuid)
     cpBefore = GetComboPoints() or 0  -- Track CPs before Bite to detect gain
   }
   carnageFrame:Show()
+end
+
+function lib:BladeRushRank()
+  return bladeRushRank
 end
 
 -- ============================================================================

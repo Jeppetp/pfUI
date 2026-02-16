@@ -50,7 +50,7 @@ pfUI:RegisterModule("energytick", "vanilla:tbc", function ()
         end
       elseif this.mode == "ENERGY" and diff > 0 then
         if not this.ignoreNextGain then
-          this.target = 2
+          this.target = 2 - 0.0006*UnitStat("player", 2)*pfUI.libspelldata:BladeRushRank()
         end
         this.ignoreNextGain = false
       end
@@ -73,7 +73,7 @@ pfUI:RegisterModule("energytick", "vanilla:tbc", function ()
     this.current = GetTime() - this.start
 
     if this.current > this.max then
-      this.start, this.max, this.current = GetTime(), 2, 0
+      this.start, this.max, this.current = GetTime(), 2 - 0.0006*UnitStat("player", 2)*pfUI.libspelldata:BladeRushRank(), 0
     end
 
     local pos = (C.unitframes.player.pwidth ~= "-1" and C.unitframes.player.pwidth or C.unitframes.player.width) * (this.current / this.max)
